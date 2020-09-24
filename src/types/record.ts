@@ -61,6 +61,12 @@ export interface Record<T extends RecordFields> {
 	tableId?: TableId
 }
 
+export interface RemoteRecord<T extends RecordFields> {
+	id: RecordId
+	fields: T
+	tableId?: TableId
+}
+
 export interface QuerySorts {
 	field: string
 	direction?: 'asc' | 'desc'
