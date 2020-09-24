@@ -1,4 +1,7 @@
-import { Base } from './types/base'
+import {
+	Base,
+	BaseId
+} from './types/base'
 import {
 	Mapping,
 	Mappings
@@ -9,7 +12,7 @@ import {
 	LockedRecordFields,
 	RecordFields,
 	SelectField,
-	AirtableRecord, QuerySorts
+	AirtableRecord, QuerySorts, RemoteRecord, RecordId
 } from './types/record'
 import {
 	Field,
@@ -21,75 +24,182 @@ import {
 	View,
 	ViewId
 } from './types/table'
+import { FetchOptions } from './types/fetch'
 
-const { Converter, AirtableUtils } = function() {
-	interface ConverterInterface {
-		getFormatedDate(date?: string | Date): string
-		getFormatedTime(time?: string | Date, opts?: { military: boolean }): string
-		getISOFormattedDate(date: string | Date): string,
-		getISOFormattedDateTime(date: string | Date, time: string | Date): string
-	}
-	
-	const Converter: ConverterInterface = {
-		/** Formated a date for Airtable's Date Field
-		 * @param [date] {string | Date} - The date to be converted
-		 * @returns {string}
-		 */
-		getFormatedDate: function(date?: string | Date): string {
-			let _date: Date
-			if(typeof date === 'string') { _date = new Date(date) }
-			else if(date) { _date = date }
-			else if(!date) { _date = new Date() }
-			if(isNaN(Number(_date.getTime()))) throw new Error(`ERROR: Invalid date ${date}`)
-			return `${_date.getMonth()}-${_date.getDate()}-${_date.getFullYear()}`
-		},
-		/** @param [time] {string | Date} - The Time to be converted
-		 * 	@param [opts] {{military: boolean}} - Should be returned in military time
-		 * @returns {string}
-		*/
-		getFormatedTime: function(time?: string | Date, opts?: { military: boolean }): string {
-			let _time: Date
-			if(typeof time === 'string') { _time = new Date('01/01/1970 ' + time) }
-			else if(time) { _time = time }
-			else if(!time) { _time = new Date() }
-			if(isNaN(Number(_time.getTime()))) throw new Error(`ERROR: Invalid date ${time}`)
-			const hour = _time.getHours()
-			const minute = _time.getMinutes()
-			return opts?.military
-				? `${hour}:${minute}`
-				: `${hour <= 12 ? hour : 12 - hour }:${minute} ${hour < 12 ? 'AM' : 'PM'}`
-		},
-		/** Returns a date in ISO format
-		 * @param [date] {string | Date} 
-		 * @returns {string}
-		*/
-		getISOFormattedDate: function(date?: string | Date): string {
-			const _date = this.getFormatedDate(date)
-			return new Date(_date + ' 00:00:00').toISOString()
-		},
-		/** Returns a date in ISO format
-		 * @param [date] {string | Date} 
-		 * @param [time] {string | Date} 
-		 * @returns {string}
-		*/
-		getISOFormattedDateTime: function(
-			date?: string | Date,
-			time?: string | Date
-		): string {
-			const _date = this.getFormatedDate(date)
-			const _time = this.getFormatedTime(time, { military: true })
-			return new Date(`${_date} ${_time}`).toISOString()
+interface ConverterInterface {
+	getFormatedDate(date?: string | Date): string
+	getFormatedTime(time?: string | Date, opts?: { military: boolean }): string
+	getISOFormattedDate(date: string | Date): string,
+	getISOFormattedDateTime(date: string | Date, time: string | Date): string
+}
+
+interface AirtableInterface {
+	fieldTypes: { [index: string]: string },
+	selectTable(base: Base, tableId: TableId): Table
+	selectView(
+		base: Base,
+		tableId: TableId,
+		viewId: ViewId
+	): View
+	selectField(
+		base: Base,
+		tableId: TableId,
+		fieldId: FieldId
+	): Field
+	convertRecordFieldsToIds(
+		tableId: TableId,
+		fields: RecordFields,
+		mappings: Mappings,
+		options?: {
+			noNull?: boolean,
+			useFieldId?: boolean
 		}
+	): LockedRecordFields
+	convertRecordFieldsToNames<T extends RecordFields>(
+		tableId: string,
+		records: AirtableRecord[],
+		mappings: Mappings,
+		fields?: Mapping[],
+		opts?: {
+			useIds?: boolean,
+			ignoreLinkedFields?: boolean
+		}
+	): Record<T>[],
+	selectTableAndRecords(
+		base: Base,
+		tableId: TableId,
+		fields: FieldId[],
+		sorts: QuerySorts[],
+		color: 'none' | 'bySelectField' | 'byView'
+	): Promise<QueryResult>
+	createRecords(
+		base: Base,
+		tableId: TableId,
+		records: { fields: RecordFields }[]
+	): Promise<string[]>,
+	createErrorRecord(
+		base: Base,
+		tableId: string,
+		errorName: string,
+		errorType: string,
+		errorMessage: string,
+		mappings: Mappings
+	): Promise<void>,
+	updateRecords(
+		base: Base,
+		tableId: string,
+		updates: Record<RecordFields>[]
+	): Promise<void>
+	removeRecords(
+		base: Base,
+		tableId: TableId,
+		recordsIds: string[]
+	): Promise<string[]>
+}
+
+interface RemoteConnectionInterface {
+	getRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		mappings: Mappings,
+		view?: ViewId,
+		fields?: FieldId[]
+	): Promise<RemoteRecord<T>[]>
+	createRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		fields: T[],
+		mappings: Mappings
+	): Promise<RemoteRecord<T>[]>
+	updateRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		records: Record<T>[],
+		mappings: Mappings
+	): Promise<RemoteRecord<T>[]>
+	deleteRecords(
+		baseId: BaseId,
+		tableId: TableId,
+		records: RecordId[]
+	): Promise<{ id: RecordId, deleted: boolean }[]>
+}
+
+interface Utilties {
+	Converter: ConverterInterface
+	AirtableUtils: AirtableInterface,
+	RemoteConnection: RemoteConnectionInterface
+}
+
+const { Converter, AirtableUtils, RemoteConnection } = function(): Utilties {
+
+	/** Formated a date for Airtable's Date Field
+	 * @param [date] {string | Date} - The date to be converted
+	 * @returns {string}
+	 */
+	function getFormatedDate(date?: string | Date): string {
+		let _date: Date
+		if(typeof date === 'string') { _date = new Date(date) }
+		else if(date) { _date = date }
+		else if(!date) { _date = new Date() }
+		if(isNaN(Number(_date.getTime()))) throw new Error(`ERROR: Invalid date ${date}`)
+		return `${_date.getMonth()}-${_date.getDate()}-${_date.getFullYear()}`
 	}
 
-	function formatKey(key: string) {
+	/** @param [time] {string | Date} - The Time to be converted
+	 * 	@param [opts] {{military: boolean}} - Should be returned in military time
+	 * @returns {string}
+	*/
+	function getFormatedTime(time?: string | Date, opts?: { military: boolean }): string {
+		let _time: Date
+		if(typeof time === 'string') { _time = new Date('01/01/1970 ' + time) }
+		else if(time) { _time = time }
+		else if(!time) { _time = new Date() }
+		if(isNaN(Number(_time.getTime()))) throw new Error(`ERROR: Invalid date ${time}`)
+		const hour = _time.getHours()
+		const minute = _time.getMinutes()
+		return opts?.military
+			? `${hour}:${minute}`
+			: `${hour <= 12 ? hour : 12 - hour }:${minute} ${hour < 12 ? 'AM' : 'PM'}`
+	}
+
+	/** Returns a date in ISO format
+	 * @param [date] {string | Date} 
+	 * @returns {string}
+	*/
+	function getISOFormattedDate(date?: string | Date): string {
+		const _date = this.getFormatedDate(date)
+		return new Date(_date + ' 00:00:00').toISOString()
+	}
+
+	/** Returns a date in ISO format
+	 * @param [date] {string | Date} 
+	 * @param [time] {string | Date} 
+	 * @returns {string}
+	*/
+	function getISOFormattedDateTime(
+		date?: string | Date,
+		time?: string | Date
+	): string {
+		const _date = this.getFormatedDate(date)
+		const _time = this.getFormatedTime(time, { military: true })
+		return new Date(`${_date} ${_time}`).toISOString()
+	}
+
+	const Converter: ConverterInterface = {
+		getFormatedDate,
+		getFormatedTime,
+		getISOFormattedDate,
+		getISOFormattedDateTime,
+	}
+
+	function _formatKey(key: string) {
 		return key.split('-').map((word, i) => i !== 0 
 			? word.substring(0,1).toUpperCase() + word.substring(1) 
 			: word
 		).join('')
 	}
 
-	function getFieldsInTable(
+	function _getFieldsInTable(
 		tableId: string,
 		mappings: Mappings
 	): Mapping[] {
@@ -100,7 +210,7 @@ const { Converter, AirtableUtils } = function() {
 			Object.keys(map).forEach(k => {
 				const item = map[k].find(item => item.tableId === tableId && item.fieldId)
 				if(item) {
-					item.refName = formatKey(k)
+					item.refName = _formatKey(k)
 					hasTable.push(item)
 				}
 			})
@@ -108,7 +218,7 @@ const { Converter, AirtableUtils } = function() {
 		}).flat()
 	}
 
-	async function selectRecords(
+	async function _selectRecords(
 		table: Table, 
 		fields?: string[], 
 		sorts?: QuerySorts[], 
@@ -121,16 +231,16 @@ const { Converter, AirtableUtils } = function() {
 		return table.selectRecordsAsync(opts);
 	}
 	
-	async function selectAndLoadRecords(
+	async function _selectAndLoadRecords(
 		table: Table, 
 		fields?: string[], 
 		sorts?: QuerySorts[], 
 		color?: 'none' | 'bySelectField' | 'byView'
 	): Promise<QueryResult> {
-		return await selectRecords(table, fields, sorts, color)
+		return await _selectRecords(table, fields, sorts, color)
 	}
 
-	async function throttleTableUsage(
+	async function _throttleTableUsage(
 		records: string[] | Record<RecordFields>[] | RecordFields[],
 		func: (records: string[] | Record<RecordFields>[] | RecordFields[]) => Promise<string[] | void>
 	): Promise<string[]> {
@@ -143,71 +253,344 @@ const { Converter, AirtableUtils } = function() {
 		}
 		return results;
 	}
-	
-	interface AirtableInterface {
-		fieldTypes: { [index: string]: string },
-		selectTable(base: Base, tableId: TableId): Table
-		selectView(
-			base: Base,
-			tableId: TableId,
-			viewId: ViewId
-		): View
-		selectField(
-			base: Base,
-			tableId: TableId,
-			fieldId: FieldId
-		): Field
-		convertRecordFieldsToIds(
-			tableId: TableId,
-			fields: RecordFields,
-			mappings: Mappings,
-			options?: {
-				noNull?: boolean,
-				useFieldId?: boolean
-			}
-		): LockedRecordFields
-		convertRecordFieldsToNames<T extends RecordFields>(
-			tableId: string,
-			records: AirtableRecord[],
-			mappings: Mappings,
-			fields?: Mapping[],
-			opts?: {
-				useIds?: boolean,
-				ignoreLinkedFields?: boolean
-			}
-		): Record<T>[],
-		selectTableAndRecords(
-			base: Base,
-			tableId: TableId,
-			fields: FieldId[],
-			sorts: QuerySorts[],
-			color: 'none' | 'bySelectField' | 'byView'
-		): Promise<QueryResult>
-		createRecords(
-			base: Base,
-			tableId: TableId,
-			records: { fields: RecordFields }[]
-		): Promise<string[]>,
-		createErrorRecord(
-			base: Base,
-			tableId: string,
-			errorName: string,
-			errorType: string,
-			errorMessage: string,
-			mappings: Mappings
-		): Promise<void>,
-		updateRecords(
-			base: Base,
-			tableId: string,
-			updates: Record<RecordFields>[]
-		): Promise<void>
-		removeRecords(
-			base: Base,
-			tableId: TableId,
-			recordsIds: string[]
-		): Promise<string[]>
+
+	/** Selects a table from the current base
+	 * @param base {Base} - The global base object
+	 * @param tableId {string} - The table you want to select
+	 */
+	function selectTable(base: Base, tableId: TableId): Table {
+		return base.getTable(tableId);
 	}
-	
+
+	/** Select a view from the current base
+	 * @param base {Base} - Global Base Object
+	 * @param tableId {string} - The Table the view is in
+	 * @param viewId {string} - The view you want
+	 */
+	function selectView(
+		base: Base,
+		tableId: TableId,
+		viewId: ViewId
+	): View {
+		const table = this.selectTable(base, tableId)
+		return table.getView(viewId)
+	}
+
+	/** Selects a field from a table
+	 * @param base {base} - The global base object
+	 * @param tableId {string} - The Table's ID
+	 * @param fieldId {string} - The fields ID
+	 */
+	function selectField(
+		base: Base,
+		tableId: TableId,
+		fieldId: FieldId
+	): Field {
+		const table = this.selectTable(base, tableId) as Table
+		if(table === null)
+			throw new Error(`Table Id ${tableId} does not excist in base ${base.name}`)
+		return table.getField(fieldId)
+	}
+	/** Creates the fields for the Airtable Blocks API to create or update a record
+	 * @param tableId {string} - The Table's ID
+	 * @param fields {{[index: string]: any}} - The fields being created or updated
+	 * @typedef Mappings {Object.<string, Object>}
+	 * @param mappings {{[index: string]: { [index: string]: string }[]}[]} - The mappings for the table being updated
+	 * @param [options] {Object}
+	 * @param [options.noNull] {boolean} - Exlude an null fields
+	 * @param [options.useFieldId] {boolean} - The the mappings filed IDs instead of the reference name
+	 * @returns {[index: string]: any}
+	*/
+	function convertRecordFieldsToIds(
+		tableId: TableId,
+		fields: RecordFields,
+		mappings: Mappings,
+		options?: {
+			noNull?: boolean,
+			useFieldId?: boolean
+		}
+	): LockedRecordFields {
+		/** Validates and returns a value for a string field */
+		function handleString(
+			value: string | unknown,
+		): string {
+			if(typeof value === 'string') return value ? value : ''
+			if(value.toString) return value.toString()
+			return String(value)
+		}
+
+		/** Validates and returns a value for a Date / DateTime field type */
+		function handleDateTime(value: Date | string, includesTime: boolean): string {
+			/** Date Time Fields */
+			let convertedValue: string
+			if(includesTime) {
+				if(typeof value === 'string' && value.includes(' ')) { // User entered date time
+					const [date, time] = value.split(' ')
+					convertedValue = this.onverter.getISOFormattedDateTime(date, time)
+				} else { // Pre-formated date time
+					convertedValue = this.onverter.getISOFormattedDateTime(value, value)
+				}
+			} else {
+				convertedValue = this.onverter.getISOFormattedDate(value)
+			}
+			return convertedValue
+		}
+
+		/** Validates and returns a value for a select field type */
+		function handleSelects(
+			value: string | string[] | SelectField | SelectField[],
+			multi: boolean,
+			opts?: { useId?: boolean }
+		): SelectField | SelectField[] {
+			if(!multi && Array.isArray(value)) throw new Error(`Single Selects can not be arrays`)
+			if(multi && !Array.isArray(value)) throw new Error(`Multi Selects must be an array with either an ID or Name`)
+			if(multi) {
+				value = value as string[] | SelectField[]
+				if(typeof value[0] === 'string') { // List of String
+					return (value as string[]).filter(val => val).map(val => ({ name: val }))
+				} else {
+					return (value as SelectField[])
+						.filter(val => val && (val.name || val.id))
+						.map(r => r.id ? { id: r.id } : { name: r.name } )
+				}
+			} else {
+				return typeof value === 'string'
+					? { name: value as string }
+					: (value as SelectField).id
+						? { id: (value as SelectField).id  }
+						: { name: (value as SelectField).name  }
+				
+			}
+		}
+
+
+		const _mappings = _getFieldsInTable(tableId, mappings)
+		let newRecord: RecordFields
+		try {
+			/** Builds an object with the key being the field id and value the cell value */
+			newRecord = _mappings.reduce<RecordFields>((acc, map) => {
+				let key: string, value: CustomField
+				key = options && options.useFieldId
+					? map.fieldId
+					: map.refName ? map.refName : map.fieldName
+				/** Check  for empty values */
+				if(fields[key] === null || fields[key] === undefined) {
+					if(map.fieldType == this.fieldTypes.CREATED_TIME) return acc
+					if(!options || !options.noNull) acc[map.fieldId] = null
+					return acc
+				}
+				switch(map.fieldType) {
+					case this.fieldTypes.EMAIL:
+					case this.fieldTypes.URL:
+					case this.fieldTypes.MULTILINE_TEXT:
+					case this.fieldTypes.SINGLE_LINE_TEXT:
+					case this.fieldTypes.PHONE_NUMBER:
+					case this.fieldTypes.RICH_TEXT:
+						acc[map.fieldId] = handleString(fields[key] as string)
+						break
+					case this.fieldTypes.NUMBER:
+						acc[map.fieldId] = Number(fields[key])
+						break
+					case this.fieldTypes.CHECKBOX:
+						if(typeof fields[key] === 'string') {
+							acc[map.fieldId] = fields[key] === 'checked' ? true : false
+						} else if(typeof fields[key] === 'boolean') {
+							acc[map.fieldId] = fields[key]
+						} else {
+							throw new Error(`Invalid checkbox value: ${fields[key]} for ${map.refName}`)
+						}
+						break
+					case this.fieldTypes.DATE:
+						acc[map.fieldId] = handleDateTime(fields[key] as string, false)
+						break
+					case this.fieldTypes.DATE_TIME:
+						acc[map.fieldId] = handleDateTime(fields[key] as string | Date, true)
+						break
+					case this.fieldTypes.MULTIPLE_RECORD_LINKS:
+						if(!Array.isArray(fields[key])) throw new Error(key + ' is required to be an array')
+						value = fields[key] as SelectField[]
+						if(typeof value[0] === 'string') {
+							throw new Error('Multi Options are required to be an object')
+						} else {
+							value = fields[key] as SelectField[]
+							acc[map.fieldId] = value.map(r => ({id: r.id}))
+						}
+						break
+					case this.fieldTypes.SINGLE_COLLABORATOR:
+					case this.fieldTypes.SINGLE_SELECT:
+						value = fields[key] as string
+						acc[map.fieldId] = handleSelects(value, false)
+						break
+					case this.fieldTypes.MULTIPLE_SELECTS:
+						acc[map.fieldId] = handleSelects(fields[key] as SelectField[], true)
+						break
+					case this.fieldTypes.CREATED_TIME: // Acceptions
+						break
+					default:
+						throw new Error(`Invalid field type ${map.fieldType}`)
+				}
+				return acc;
+			}, {});
+		} catch (error) {
+			console.error(error.message)
+			return null
+		}
+		return newRecord
+	}
+
+	/** Converts an Airtable Record into a Typed Record Data object
+	 * @param tableId {string} - Table id of the record
+	 * @param records {Record[]} - Array of Airtable Records
+	 * @param fields { [index: string]: string }[] } - Mappings for the fields you would like to be returned
+	 * @param mappings {{[index: string]: { [index: string]: string }[]}[]} - Standard Mappings
+	 * @param [opts] {Object}
+	 * @param [opts.useIds] {boolean} - Returns fields with the field Id instead of the reference name
+	 * @param [opts.ignoreLinkedFields] {boolean} - Will not return fields that are linked fields
+	 * @typedef CustomRecord {Object}
+	 * @property id {string}
+	 * @property name {string}
+	 * @property tableId {string}
+	 * @property fields {any}
+	 * @returns {CustomRecord[]}
+	*/
+	function convertRecordFieldsToNames<T extends RecordFields>(
+		tableId: string,
+		records: AirtableRecord[],
+		mappings: Mappings,
+		fields?: Mapping[],
+		opts?: {
+			useIds?: boolean,
+			ignoreLinkedFields?: boolean
+		}
+	): Record<T>[] {
+		if(!records || !records.length) return null
+		const key = opts && opts.useIds ? 'fieldId' : 'refName'
+		if(!fields || !fields.length) fields = _getFieldsInTable(tableId, mappings)
+		return records.map(rec => {
+			if(!rec) throw new Error('Records Array has invalid items')
+			const fieldValues: any = {}
+			fields.forEach(f => {
+				let value = rec.getCellValue(f.fieldId) as unknown
+				if(value === null || value === undefined) return fieldValues[f[key]] = null
+				switch(f.fieldType) {
+					case this.fieldTypes.NUMBER:
+						fieldValues[f[key]] = !isNaN(Number(value)) ? value as number : Number(value)
+						break
+					case this.fieldTypes.RICH_TEXT:
+						fieldValues[f[key]] = value
+						break
+					case this.fieldTypes.CHECKBOX:
+						fieldValues[f[key]] = value
+						break
+					case this.fieldTypes.SINGLE_SELECT:
+					case this.fieldTypes.SINGLE_COLLABORATOR:
+						fieldValues[f[key]] = value
+						break
+					case this.fieldTypes.MULTIPLE_RECORD_LINKS:
+					case this.fieldTypes.MULTIPLE_SELECTS:
+						fieldValues[f[key]] = Array.isArray(value) ? value : [ value ]
+						break
+					default:
+						fieldValues[f[key]] = rec.getCellValueAsString(f.fieldId)
+						break
+				}
+			})
+			return { id: rec.id, name: rec.name, tableId: tableId, fields: fieldValues }
+		})
+	}
+
+	/** Selects all the records from a table
+	 * @param base {Base} - Global Base Object
+	 * @param tableNameOrId {string} - The Table name or ID
+	 * @param [fields] {string[]} - The fields you want loaded. null / undefined for all fields
+	 * @param [sorts] {Object} - How to sort the returned records
+	 * @param [sorts.field] {string} - The field ID to sort by
+	 * @param [sorts.direction] {asc | desc} - The direction to sort
+	 * @param [color] {string}
+	 * @returns {Promise<{recordIds: string[], records: Record[], getRecord(id: string): Record}>}
+	 */
+	async function selectTableAndRecords(
+		base: Base, 
+		tableIdOrName: string, 
+		fields?: FieldId[], 
+		sorts?: QuerySorts[], 
+		color?: 'none' | 'bySelectField' | 'byView'
+	): Promise<QueryResult> {
+		const table = this.selectTable(base, tableIdOrName)
+		if(!table) throw new Error(`Table ID ${tableIdOrName} is not valid in base ${base.name}`)
+		return await _selectAndLoadRecords(table, fields, sorts, color)
+	}
+
+	/** Creates records
+	 * @param base {Base} - Global Base Object
+	 * @param tableId {string} - The table's id where the records will be created
+	 * @param records {Object} - Converted records to be created
+	 * @param records.fields {unknown}
+	 * @returns {Promise<string[]>}
+	 */
+	function createRecords(
+		base: Base,
+		tableId: TableId,
+		records: { fields: RecordFields }[],
+	): Promise<string[]> {
+		const table = this.selectTable(base, tableId);
+		return _throttleTableUsage(records, (r: { fields: RecordFields }[]) => table.createRecordsAsync(r))
+			.then(ids => [].concat.apply([], ids));
+	}
+
+	/** Creates a record in an errors table if it is mapped
+	 * @param base {Base} - Global Base Object
+	 * @param tableId {string} - The table's id where the records will be created
+	 * @param errorName {string}
+	 * @param errorType {string}
+	 * @param errorMessage {string}
+	 * @param mappings {{[index: string]: { [index: string]: string }[]}[]} - Standard Mappings
+	 * @returns {Promise<string[]>}
+	 */
+	async function createErrorRecord(
+		base: Base,
+		tableId: string,
+		errorName: string,
+		errorType: string,
+		errorMessage: string,
+		mappings: Mappings
+	): Promise<void> {
+		const record = this.convertRecordFieldsToIds(tableId, {
+			name: errorName, errorType, errorMessage
+		}, mappings)
+		await this.createRecords(base, tableId, [ { fields: record } ])
+	}
+
+	/** Updates records in a table
+	 * @param base {Base} - Global Base Object
+	 * @param tableId {string} - The table's id where the records will be created
+	 * @param records {{ id: string, fields: unknown }} - Converted records to be updated. include record id
+	 * @returns {Promise<void>}
+	 */
+	async function updateRecords(
+		base: Base,
+		tableId: string,
+		updates: Record<RecordFields>[]
+	): Promise<void> {
+		const table = this.selectTable(base, tableId);
+		await _throttleTableUsage(updates, (r: Record<RecordFields>[]) => table.updateRecordsAsync(r))
+	}
+
+	/** Removes records in a table
+	 * @param base {Base} - Global Base Object
+	 * @param tableId {string} - The table's id where the records will be created
+	 * @param recordsIds {string[]} - String of ids of the records that will be removed
+	 * @returns {Promise<void>}
+	 */
+	function removeRecords(
+		base: Base,
+		tableId: TableId,
+		recordsIds: string[]
+	): Promise<string[]> {
+		const table = this.selectTable(base, tableId);
+		return _throttleTableUsage(recordsIds, (r: string[]) => table.deleteRecordsAsync(r))
+	}
+
 	const AirtableUtils: AirtableInterface = {
 		fieldTypes: {
 			SINGLE_LINE_TEXT: "singleLineText",
@@ -242,331 +625,113 @@ const { Converter, AirtableUtils } = function() {
 			LAST_MODIFIED_BY: "lastModifiedBy",
 			BUTTON: "button"
 		},
-		/** Selects a table from the current base
-		 * @param base {Base} - The global base object
-		 * @param tableId {string} - The table you want to select
-		 */
-		selectTable: function(base: Base, tableId: TableId): Table {
-			return base.getTable(tableId);
+		selectTable,
+		selectView,
+		selectField,
+		convertRecordFieldsToIds,
+		convertRecordFieldsToNames,
+		selectTableAndRecords,
+		createRecords,
+		createErrorRecord,
+		updateRecords,
+		removeRecords
+	}
+
+	const _fetch = {
+		_baseUrl: '',
+		_methods: {
+			get: 'GET',
+			post: 'POST',
+			patch: 'PATCH',
+			put: 'PUT',
+			delete: 'DELETE'
 		},
-		/** Select a view from the current base
-		 * @param base {Base} - Global Base Object
-		 * @param tableId {string} - The Table the view is in
-		 * @param viewId {string} - The view you want
-		 */
-		selectView: function(
-			base: Base,
-			tableId: TableId,
-			viewId: ViewId
-		): View {
-			const table = this.selectTable(base, tableId)
-			return table.getView(viewId)
-		},
-		/** Selects a field from a table
-		 * @param base {base} - The global base object
-		 * @param tableId {string} - The Table's ID
-		 * @param fieldId {string} - The fields ID
-		 */
-		selectField: function(
-			base: Base,
-			tableId: TableId,
-			fieldId: FieldId
-		): Field {
-			const table = this.selectTable(base, tableId) as Table
-			if(table === null)
-				throw new Error(`Table Id ${tableId} does not excist in base ${base.name}`)
-			return table.getField(fieldId)
-		},
-		/** Creates the fields for the Airtable Blocks API to create or update a record
-		 * @param tableId {string} - The Table's ID
-		 * @param fields {{[index: string]: any}} - The fields being created or updated
-		 * @param mappings {{[index: string]: { [index: string]: string }[]}[]} - The mappings for the table being updated
-		 * @param [options] {Object}
-		 * @param [options.noNull] {boolean} - Exlude an null fields
-		 * @param [options.useFieldId] {boolean} - The the mappings filed IDs instead of the reference name
-		 * @returns {{}}
-		*/
-		convertRecordFieldsToIds: function(
-			tableId: TableId,
-			fields: RecordFields,
-			mappings: Mappings,
-			options?: {
-				noNull?: boolean,
-				useFieldId?: boolean
-			}
-	   ): LockedRecordFields {
-			/** Validates and returns a value for a string field */
-			function handleString(
-				value: string | unknown,
-			): string {
-				if(typeof value === 'string') return value ? value : ''
-				if(value.toString) return value.toString()
-				return String(value)
-			}
-	
-			/** Validates and returns a value for a Date / DateTime field type */
-			function handleDateTime(value: Date | string, includesTime: boolean): string {
-				/** Date Time Fields */
-				let convertedValue: string
-				if(includesTime) {
-					if(typeof value === 'string' && value.includes(' ')) { // User entered date time
-						const [date, time] = value.split(' ')
-						convertedValue = this.onverter.getISOFormattedDateTime(date, time)
-					} else { // Pre-formated date time
-						convertedValue = this.onverter.getISOFormattedDateTime(value, value)
-					}
-				} else {
-					convertedValue = this.onverter.getISOFormattedDate(value)
-				}
-				return convertedValue
-			}
-	
-			/** Validates and returns a value for a select field type */
-			function handleSelects(
-				value: string | string[] | SelectField | SelectField[],
-				multi: boolean,
-				opts?: { useId?: boolean }
-			): SelectField | SelectField[] {
-				if(!multi && Array.isArray(value)) throw new Error(`Single Selects can not be arrays`)
-				if(multi && !Array.isArray(value)) throw new Error(`Multi Selects must be an array with either an ID or Name`)
-				if(multi) {
-					value = value as string[] | SelectField[]
-					if(typeof value[0] === 'string') { // List of String
-						return (value as string[]).filter(val => val).map(val => ({ name: val }))
-					} else {
-						return (value as SelectField[])
-							.filter(val => val && (val.name || val.id))
-							.map(r => r.id ? { id: r.id } : { name: r.name } )
-					}
-				} else {
-					return typeof value === 'string'
-						? { name: value as string }
-						: (value as SelectField).id
-							? { id: (value as SelectField).id  }
-							: { name: (value as SelectField).name  }
-					
-				}
-			}
-	
-	
-			const _mappings = getFieldsInTable(tableId, mappings)
-			let newRecord: RecordFields
+		/**  */
+		_fetch: async function<T, U>(
+			path: string,
+			method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
+			payload?: U,
+			opts?: FetchOptions
+		): Promise<T> {
+			let result: T = null
 			try {
-				/** Builds an object with the key being the field id and value the cell value */
-				newRecord = _mappings.reduce<RecordFields>((acc, map) => {
-					let key: string, value: CustomField
-					key = options && options.useFieldId
-						? map.fieldId
-						: map.refName ? map.refName : map.fieldName
-					/** Check  for empty values */
-					if(fields[key] === null || fields[key] === undefined) {
-						if(map.fieldType == this.fieldTypes.CREATED_TIME) return acc
-						if(!options || !options.noNull) acc[map.fieldId] = null
-						return acc
-					}
-					switch(map.fieldType) {
-						case this.fieldTypes.EMAIL:
-						case this.fieldTypes.URL:
-						case this.fieldTypes.MULTILINE_TEXT:
-						case this.fieldTypes.SINGLE_LINE_TEXT:
-						case this.fieldTypes.PHONE_NUMBER:
-						case this.fieldTypes.RICH_TEXT:
-							acc[map.fieldId] = handleString(fields[key] as string)
-							break
-						case this.fieldTypes.NUMBER:
-							acc[map.fieldId] = Number(fields[key])
-							break
-						case this.fieldTypes.CHECKBOX:
-							if(typeof fields[key] === 'string') {
-								acc[map.fieldId] = fields[key] === 'checked' ? true : false
-							} else if(typeof fields[key] === 'boolean') {
-								acc[map.fieldId] = fields[key]
-							} else {
-								throw new Error(`Invalid checkbox value: ${fields[key]} for ${map.refName}`)
-							}
-							break
-						case this.fieldTypes.DATE:
-							acc[map.fieldId] = handleDateTime(fields[key] as string, false)
-							break
-						case this.fieldTypes.DATE_TIME:
-							acc[map.fieldId] = handleDateTime(fields[key] as string | Date, true)
-							break
-						case this.fieldTypes.MULTIPLE_RECORD_LINKS:
-							if(!Array.isArray(fields[key])) throw new Error(key + ' is required to be an array')
-							value = fields[key] as SelectField[]
-							if(typeof value[0] === 'string') {
-								throw new Error('Multi Options are required to be an object')
-							} else {
-								value = fields[key] as SelectField[]
-								acc[map.fieldId] = value.map(r => ({id: r.id}))
-							}
-							break
-						case this.fieldTypes.SINGLE_COLLABORATOR:
-						case this.fieldTypes.SINGLE_SELECT:
-							value = fields[key] as string
-							acc[map.fieldId] = handleSelects(value, false)
-							break
-						case this.fieldTypes.MULTIPLE_SELECTS:
-							acc[map.fieldId] = handleSelects(fields[key] as SelectField[], true)
-							break
-						case this.fieldTypes.CREATED_TIME: // Acceptions
-							break
-						default:
-							throw new Error(`Invalid field type ${map.fieldType}`)
-					}
-					return acc;
-				}, {});
-			} catch (error) {
-				console.error(error.message)
-				return null
-			}
-			return newRecord
-		},
-		/** Converts an Airtable Record into a Typed Record Data object
-		 * @param tableId {string} - Table id of the record
-		 * @param records {Record[]} - Array of Airtable Records
-		 * @param mappings {{[index: string]: { [index: string]: string }[]}[]} - Standard Mappings
-		 * @param [opts] {Object}
-		 * @param [opts.useIds] {boolean} - Returns fields with the field Id instead of the reference name
-		 * @param [opts.ignoreLinkedFields] {boolean} - Will not return fields that are linked fields
-		 * @returns {{id: string, name: string, tableId: string, fields: any, }[]}
-		*/
-		convertRecordFieldsToNames: function<T extends RecordFields>(
-			tableId: string,
-			records: AirtableRecord[],
-			mappings: Mappings,
-			fields?: Mapping[],
-			opts?: {
-				useIds?: boolean,
-				ignoreLinkedFields?: boolean
-			}
-		): Record<T>[] {
-			if(!records || !records.length) return null
-			const key = opts && opts.useIds ? 'fieldId' : 'refName'
-			if(!fields || !fields.length) fields = getFieldsInTable(tableId, mappings)
-			return records.map(rec => {
-				if(!rec) throw new Error('Records Array has invalid items')
-				const fieldValues: any = {}
-				fields.forEach(f => {
-					let value = rec.getCellValue(f.fieldId) as unknown
-					if(value === null || value === undefined) return fieldValues[f[key]] = null
-					switch(f.fieldType) {
-						case this.fieldTypes.NUMBER:
-							fieldValues[f[key]] = !isNaN(Number(value)) ? value as number : Number(value)
-							break
-						case this.fieldTypes.RICH_TEXT:
-							fieldValues[f[key]] = value
-							break
-						case this.fieldTypes.CHECKBOX:
-							fieldValues[f[key]] = value
-							break
-						case this.fieldTypes.SINGLE_SELECT:
-						case this.fieldTypes.SINGLE_COLLABORATOR:
-							fieldValues[f[key]] = value
-							break
-						case this.fieldTypes.MULTIPLE_RECORD_LINKS:
-						case this.fieldTypes.MULTIPLE_SELECTS:
-							fieldValues[f[key]] = Array.isArray(value) ? value : [ value ]
-							break
-						default:
-							fieldValues[f[key]] = rec.getCellValueAsString(f.fieldId)
-							break
-					}
+				const res = await fetch(`${this.url}${path}`, {
+					headers: this.applyHeaders(opts?.baseId),
+					method: method,
+					body: JSON.stringify(payload)
 				})
-				return { id: rec.id, name: rec.name, tableId: tableId, fields: fieldValues }
-			})
+				if(!res.ok) throw new Error(`Fetch Error: ${res.statusText} - ${res.status.toString()}`)
+				result = await res.json() as T
+			} catch (error) {
+				console.error(error)
+				throw new Error('Fetch Error')
+			}
+			return result
 		},
-		/** Selects all the records from a table
-		 * @param base {Base} - Global Base Object
-		 * @param tableNameOrId {string} - The Table name or ID
-		 * @param [fields] {string[]} - The fields you want loaded. null / undefined for all fields
-		 * @param [sorts] {Object} - How to sort the returned records
-		 * @param [sorts.field] {string} - The field ID to sort by
-		 * @param [sorts.direction] {asc | desc} - The direction to sort
-		 * @param [color] {string}
-		 * @returns {Promise<{recordIds: string[], records: Record[], getRecord(id: string): Record}>}
-		 */
-		selectTableAndRecords: async function(
-			base: Base, 
-			tableIdOrName: string, 
-			fields?: FieldId[], 
-			sorts?: QuerySorts[], 
-			color?: 'none' | 'bySelectField' | 'byView'
-		): Promise<QueryResult> {
-			const table = this.selectTable(base, tableIdOrName)
-			if(!table) throw new Error(`Table ID ${tableIdOrName} is not valid in base ${base.name}`)
-			return await selectAndLoadRecords(table, fields, sorts, color)
-		},
-		/** Creates records
-		 * @param base {Base} - Global Base Object
-		 * @param tableId {string} - The table's id where the records will be created
-		 * @param records {Object} - Converted records to be created
-		 * @param records.fields {unknown}
-		 * @returns {Promise<string[]>}
-		 */
-		createRecords: function(
-			base: Base,
-			tableId: TableId,
-			records: { fields: RecordFields }[],
-		): Promise<string[]> {
-			const table = this.selectTable(base, tableId);
-			return throttleTableUsage(records, (r: { fields: RecordFields }[]) => table.createRecordsAsync(r))
-				.then(ids => [].concat.apply([], ids));
-		},
-		/** Creates a record in an errors table if it is mapped
-		 * @param base {Base} - Global Base Object
-		 * @param tableId {string} - The table's id where the records will be created
-		 * @param errorName {string}
-		 * @param errorType {string}
-		 * @param errorMessage {string}
-		 * @param mappings {{[index: string]: { [index: string]: string }[]}[]} - Standard Mappings
-		 * @returns {Promise<string[]>}
-		 */
-		createErrorRecord: async function(
-			base: Base,
-			tableId: string,
-			errorName: string,
-			errorType: string,
-			errorMessage: string,
-			mappings: Mappings
-		): Promise<void> {
-			const record = this.convertRecordFieldsToIds(tableId, {
-				name: errorName, errorType, errorMessage
-			}, mappings)
-			await this.createRecords(base, tableId, [ { fields: record } ])
-		},
-		/** Updates records in a table
-		 * @param base {Base} - Global Base Object
-		 * @param tableId {string} - The table's id where the records will be created
-		 * @param records {{ id: string, fields: unknown }} - Converted records to be updated. include record id
-		 * @returns {Promise<void>}
-		 */
-		updateRecords: async function(
-			base: Base,
-			tableId: string,
-			updates: Record<RecordFields>[]
-		): Promise<void> {
-			const table = this.selectTable(base, tableId);
-			await throttleTableUsage(updates, (r: Record<RecordFields>[]) => table.updateRecordsAsync(r))
-		},
-		/** Removes records in a table
-		 * @param base {Base} - Global Base Object
-		 * @param tableId {string} - The table's id where the records will be created
-		 * @param recordsIds {string[]} - String of ids of the records that will be removed
-		 * @returns {Promise<void>}
-		 */
-		removeRecords: function(
-			base: Base,
-			tableId: TableId,
-			recordsIds: string[]
-		): Promise<string[]> {
-			const table = this.selectTable(base, tableId);
-			return throttleTableUsage(recordsIds, (r: string[]) => table.deleteRecordsAsync(r))
+		get: async function(
+			path: string,
+			opts?: FetchOptions
+		): Promise<RemoteRecord<T>[]> {
+
 		}
+	}
+
+	/** Gets all the records from a remote base's specified table
+	 * @param baseId {string}
+	 * @param tableId {string}
+	 * @param mappings {{[index: string]: { [index: string]: string }[]}[]}
+	 * @param view {string}
+	 * @param fields {string[]}
+	 * @return 
+	 */
+	function getRemoteRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		mappings: Mappings,
+		view?: ViewId,
+		fields?: FieldId[]
+	): Promise<RemoteRecord<T>[]> {
+		return _fetch.get()
+	}
+
+	function createRemoteRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		fields: T[],
+		mappings: Mappings
+	): Promise<RemoteRecord<T>[]>{
+
+	}
+
+	function updateRemoteRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		records: Record<T>[],
+		mappings: Mappings
+	): Promise<RemoteRecord<T>[]>{
+
+	}
+
+	function deleteRemoteRecords<T extends RecordFields>(
+		baseId: BaseId,
+		tableId: TableId,
+		records: RecordId[]
+	): Promise<{ id: RecordId, deleted: boolean }[]>{
+
+	}
+
+	const RemoteConnection: RemoteConnectionInterface = {
+		getRecords: getRemoteRecords,
+		createRecords: createRemoteRecords,
+		updateRecords: updateRemoteRecords,
+		deleteRecords: deleteRemoteRecords
 	}
 
 	return {
 		Converter: Converter,
-		AirtableUtils: AirtableUtils
+		AirtableUtils: AirtableUtils,
+		RemoteConnection: RemoteConnection
 	}
 }()
+
+

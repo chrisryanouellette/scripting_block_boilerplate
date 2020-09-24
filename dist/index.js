@@ -1,4 +1,6 @@
-const { Converter, AirtableUtils } = function () {
+"use strict";
+
+const { Converter, AirtableUtils, RemoteConnection } = function () {
     var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
         function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
         return new (P || (P = Promise))(function (resolve, reject) {
@@ -8,66 +10,70 @@ const { Converter, AirtableUtils } = function () {
             step((generator = generator.apply(thisArg, _arguments || [])).next());
         });
     };
-    const Converter = {
-        /** Formated a date for Airtable's Date Field
-         * @param [date] {string | Date} - The date to be converted
-         * @returns {string}
-         */
-        getFormatedDate: function (date) {
-            let _date;
-            if (typeof date === 'string') {
-                _date = new Date(date);
-            }
-            else if (date) {
-                _date = date;
-            }
-            else if (!date) {
-                _date = new Date();
-            }
-            if (isNaN(Number(_date.getTime())))
-                throw new Error(`ERROR: Invalid date ${date}`);
-            return `${_date.getMonth()}-${_date.getDate()}-${_date.getFullYear()}`;
-        },
-        /** @param [time] {string | Date} - The Time to be converted
-         * 	@param [opts] {{military: boolean}} - Should be returned in military time
-         * @returns {string}
-        */
-        getFormatedTime: function (time, opts) {
-            let _time;
-            if (typeof time === 'string') {
-                _time = new Date('01/01/1970 ' + time);
-            }
-            else if (time) {
-                _time = time;
-            }
-            else if (!time) {
-                _time = new Date();
-            }
-            if (isNaN(Number(_time.getTime())))
-                throw new Error(`ERROR: Invalid date ${time}`);
-            const hour = _time.getHours();
-            const minute = _time.getMinutes();
-            return (opts === null || opts === void 0 ? void 0 : opts.military) ? `${hour}:${minute}`
-                : `${hour <= 12 ? hour : 12 - hour}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
-        },
-        /** Returns a date in ISO format
-         * @param [date] {string | Date}
-         * @returns {string}
-        */
-        getISOFormattedDate: function (date) {
-            const _date = this.getFormatedDate(date);
-            return new Date(_date + ' 00:00:00').toISOString();
-        },
-        /** Returns a date in ISO format
-         * @param [date] {string | Date}
-         * @param [time] {string | Date}
-         * @returns {string}
-        */
-        getISOFormattedDateTime: function (date, time) {
-            const _date = this.getFormatedDate(date);
-            const _time = this.getFormatedTime(time, { military: true });
-            return new Date(`${_date} ${_time}`).toISOString();
+    /** Formated a date for Airtable's Date Field
+     * @param [date] {string | Date} - The date to be converted
+     * @returns {string}
+     */
+    function getFormatedDate(date) {
+        let _date;
+        if (typeof date === 'string') {
+            _date = new Date(date);
         }
+        else if (date) {
+            _date = date;
+        }
+        else if (!date) {
+            _date = new Date();
+        }
+        if (isNaN(Number(_date.getTime())))
+            throw new Error(`ERROR: Invalid date ${date}`);
+        return `${_date.getMonth()}-${_date.getDate()}-${_date.getFullYear()}`;
+    }
+    /** @param [time] {string | Date} - The Time to be converted
+     * 	@param [opts] {{military: boolean}} - Should be returned in military time
+     * @returns {string}
+    */
+    function getFormatedTime(time, opts) {
+        let _time;
+        if (typeof time === 'string') {
+            _time = new Date('01/01/1970 ' + time);
+        }
+        else if (time) {
+            _time = time;
+        }
+        else if (!time) {
+            _time = new Date();
+        }
+        if (isNaN(Number(_time.getTime())))
+            throw new Error(`ERROR: Invalid date ${time}`);
+        const hour = _time.getHours();
+        const minute = _time.getMinutes();
+        return (opts === null || opts === void 0 ? void 0 : opts.military) ? `${hour}:${minute}`
+            : `${hour <= 12 ? hour : 12 - hour}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
+    }
+    /** Returns a date in ISO format
+     * @param [date] {string | Date}
+     * @returns {string}
+    */
+    function getISOFormattedDate(date) {
+        const _date = this.getFormatedDate(date);
+        return new Date(_date + ' 00:00:00').toISOString();
+    }
+    /** Returns a date in ISO format
+     * @param [date] {string | Date}
+     * @param [time] {string | Date}
+     * @returns {string}
+    */
+    function getISOFormattedDateTime(date, time) {
+        const _date = this.getFormatedDate(date);
+        const _time = this.getFormatedTime(time, { military: true });
+        return new Date(`${_date} ${_time}`).toISOString();
+    }
+    const Converter = {
+        getFormatedDate,
+        getFormatedTime,
+        getISOFormattedDate,
+        getISOFormattedDateTime,
     };
     function formatKey(key) {
         return key.split('-').map((word, i) => i !== 0
@@ -443,6 +449,7 @@ const { Converter, AirtableUtils } = function () {
     };
     return {
         Converter: Converter,
-        AirtableUtils: AirtableUtils
+        AirtableUtils: AirtableUtils,
+        RemoteConnection: {}
     };
 }();
