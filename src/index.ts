@@ -30,6 +30,10 @@ interface ConverterInterface {
 	getISOFormattedDateTime(date: string | Date, time: string | Date): string
 }
 
+interface UtilsInterface {
+	findDay(startDate: Date, dayNumber: number, searchDirection: boolean): Date
+}
+
 interface AirtableInterface {
 	fieldTypes: { [index: string]: string }
 	selectTable(base: Base, tableId: TableId): Table
@@ -192,6 +196,7 @@ interface Utilties {
 	Converter: ConverterInterface
 	AirtableUtils: AirtableInterface
 	RemoteConnection: RemoteConnectionInterface
+	Utils: UtilsInterface
 }
 
 const APIKEY = ''
@@ -199,7 +204,7 @@ const APIKEY = ''
 /** Boilerplate for Scripting Apps
  * @param [APIKEY] {string}
  */
-const { Converter, AirtableUtils, RemoteConnection } = (function (
+const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	APIKEY?: string
 ): Utilties {
 	/** Airtable Scripting Block Utitilies
@@ -269,7 +274,7 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 			_date = new Date()
 		}
 		if (isNaN(Number(_date.getTime()))) throw new Error(`ERROR: Invalid date ${date}`)
-		return `${_date.getMonth()}-${_date.getDate()}-${_date.getFullYear()}`
+		return `${_date.getMonth() + 1}/${_date.getDate()}/${_date.getFullYear()}`
 	}
 
 	/** @param [time] {string | Date} - The Time to be converted
@@ -279,11 +284,13 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 	function getFormatedTime(time?: string | Date, opts?: { military: boolean }): string {
 		let _time: Date
 		if (typeof time === 'string') {
-			time = time.toLowerCase()
 			if (time.includes('am') || time.includes('pm')) {
+				time = time.toLowerCase()
 				time = time.substring(0, time.indexOf(':') + 3) + ' ' + time.slice(-2)
+				_time = new Date('01/01/1970 ' + time)
+			} else {
+				_time = new Date(time)
 			}
-			_time = new Date('01/01/1970 ' + time)
 		} else if (time) {
 			_time = time
 		} else if (!time) {
@@ -302,7 +309,7 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 	 * @returns {string}
 	 */
 	function getISOFormattedDate(date?: string | Date): string {
-		const _date = this.getFormatedDate(date)
+		const _date = getFormatedDate(date)
 		return new Date(_date + ' 00:00:00').toISOString()
 	}
 
@@ -312,8 +319,8 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 	 * @returns {string}
 	 */
 	function getISOFormattedDateTime(date?: string | Date, time?: string | Date): string {
-		const _date = this.getFormatedDate(date)
-		const _time = this.getFormatedTime(time, { military: true })
+		const _date = getFormatedDate(date)
+		const _time = getFormatedTime(time, { military: true })
 		return new Date(`${_date} ${_time}`).toISOString()
 	}
 
@@ -322,6 +329,31 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 		getFormatedTime,
 		getISOFormattedDate,
 		getISOFormattedDateTime,
+	}
+
+	/** Finds the closest day given a day number and direction
+	 * @param startDate {Date} - The date to start from
+	 * @param dayNumber {number} - 0 - 6 Day Number
+	 * @param searchDirection {boolean} - Search foward or backwards in time
+	 * @returns {Date}
+	 */
+	function findDay(startDate: Date, dayNumber: number, searchDirection: boolean): Date {
+		let date = new Date(startDate)
+		if (isNaN(startDate.getTime())) throw new Error('Invalid Date')
+		if (!searchDirection) {
+			while (date.getDay() !== dayNumber) {
+				date.setDate(date.getDate() - 1)
+			}
+		} else {
+			while (date.getDay() !== dayNumber) {
+				date.setDate(date.getDate() + 1)
+			}
+		}
+		return date
+	}
+
+	const Utils: UtilsInterface = {
+		findDay,
 	}
 
 	function _formatKey(key: string) {
@@ -463,7 +495,7 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 					convertedValue = getISOFormattedDateTime(value, value)
 				}
 			} else {
-				convertedValue = this.onverter.getISOFormattedDate(value)
+				convertedValue = getISOFormattedDate(value)
 			}
 			return convertedValue
 		}
@@ -673,7 +705,7 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 	/** Creates records
 	 * @param base {Base} - Global Base Object
 	 * @param tableId {string} - The table's id where the records will be created
-	 * @param records {Object} - Converted records to be created
+	 * @param records {Object[]} - Converted records to be created
 	 * @param records.fields {unknown}
 	 * @returns {Promise<string[]>}
 	 */
@@ -1176,8 +1208,9 @@ const { Converter, AirtableUtils, RemoteConnection } = (function (
 	}
 
 	return {
-		Converter: Converter,
-		AirtableUtils: AirtableUtils,
-		RemoteConnection: RemoteConnection,
+		Converter,
+		AirtableUtils,
+		RemoteConnection,
+		Utils,
 	}
 })(APIKEY)
