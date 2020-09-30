@@ -10,6 +10,9 @@ import {
 	QuerySorts,
 	RemoteRecord,
 	RecordId,
+	RemoteCustomField,
+	RemoteRecordFields,
+	LockedRemoteRecordFields,
 } from './types/record'
 import {
 	Field,
@@ -35,7 +38,6 @@ interface UtilsInterface {
 }
 
 interface AirtableInterface {
-	fieldTypes: { [index: string]: string }
 	selectTable(base: Base, tableId: TableId): Table
 	selectView(base: Base, tableId: TableId, viewId: ViewId): View
 	selectField(base: Base, tableId: TableId, fieldId: FieldId): Field
@@ -87,25 +89,38 @@ interface AirtableInterface {
 }
 
 interface RemoteConnectionInterface {
-	getRecords<T extends RecordFields>(
+	getRecords<T extends RemoteRecordFields>(
 		baseId: BaseId,
 		tableId: TableId,
 		mappings: Mappings,
-		view?: ViewId,
-		fields?: FieldId[]
-	): Promise<Record<T>[]>
-	createRecords<T extends RecordFields>(
+		urlParams?: {
+			view?: ViewId
+			fields?: FieldId[]
+			filter?: string
+		}
+	): Promise<RemoteRecord<T>[]>
+	createRecords<T extends RemoteRecordFields>(
 		baseId: BaseId,
 		tableId: TableId,
 		fields: T[],
-		mappings: Mappings
-	): Promise<Record<T>[]>
-	updateRecords<T extends RecordFields>(
+		mappings: Mappings,
+		options?: {
+			fieldsOnly?: boolean
+			noNull?: boolean
+			useFieldId?: boolean
+		}
+	): Promise<RemoteRecord<T>[]>
+	updateRecords<T extends RemoteRecordFields>(
 		baseId: BaseId,
 		tableId: TableId,
-		records: Record<T>[],
-		mappings: Mappings
-	): Promise<Record<T>[]>
+		records: RemoteRecord<T>[],
+		mappings: Mappings,
+		options?: {
+			fieldsOnly?: boolean
+			noNull?: boolean
+			useFieldId?: boolean
+		}
+	): Promise<RemoteRecord<T>[]>
 	deleteRecords(
 		baseId: BaseId,
 		tableId: TableId,
@@ -127,27 +142,38 @@ interface FetchObject {
 		delete: 'DELETE'
 	}
 	_applyHeaders(this: FetchObject, baseId?: BaseId): Headers
+	_createQueryPramas(urlParams: { [index: string]: string | string[] }): string
 	_fetch<T, U>(
 		path: string,
 		method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
 		payload?: U,
 		opts?: FetchOptions
 	): Promise<T>
-	_throttleRequests<T extends RecordFields, U extends Object>(
+	_throttleRequests<T extends RemoteRecordFields, U extends Object>(
 		this: FetchObject,
 		path: string,
 		method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
 		payload: U[],
 		opts?: FetchOptions
 	): Promise<RemoteRecord<T>[]>
-	_doUpdateRequest<T extends RecordFields, U extends Object>(
+	_doUpdateRequest<T extends RemoteRecordFields, U extends Object>(
 		baseId: BaseId,
 		tableId: TableId,
 		method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
 		payload?: U | U[],
 		opts?: FetchOptions
 	): Promise<RemoteRecord<T>[]>
-	_convertRemoteRecords<T extends RecordFields>(
+	_convertRemoteRecordFieldsToIds(
+		tableId: TableId,
+		fields: RemoteRecordFields,
+		mappings: Mappings,
+		options?: {
+			fieldsOnly?: boolean
+			noNull?: boolean
+			useFieldId?: boolean
+		}
+	): LockedRemoteRecordFields
+	_convertRemoteRecordFieldsToNames<T extends RemoteRecordFields>(
 		tableId: string,
 		records: RemoteRecord<T>[],
 		mappings: Mappings,
@@ -155,28 +181,32 @@ interface FetchObject {
 			useIds?: boolean
 			ignoreLinkedFields?: boolean
 		}
-	): Record<T>[]
-	get<T extends RecordFields>(
+	): RemoteRecord<T>[]
+	get<T extends RemoteRecordFields>(
 		this: FetchObject,
 		baseId: BaseId,
 		tableId: TableId,
-		view?: ViewId
+		urlParams?: {
+			view?: ViewId
+			fields?: FieldId[]
+			filter?: string
+		}
 	): Promise<RemoteRecord<T>[]>
-	post<T extends RecordFields, U extends Object>(
+	post<T extends RemoteRecordFields, U extends LockedRemoteRecordFields>(
 		this: FetchObject,
 		baseId: BaseId,
 		tableId: TableId,
-		payload: U | U[],
+		payload: { fields: U }[],
 		opts?: FetchOptions
 	): Promise<RemoteRecord<T>[]>
-	patch<T extends RecordFields, U extends Object>(
+	patch<T extends RemoteRecordFields>(
 		this: FetchObject,
 		baseId: BaseId,
 		tableId: TableId,
-		payload: U | U[],
+		payload: RemoteRecord<RemoteRecordFields>[],
 		opts?: FetchOptions
 	): Promise<RemoteRecord<T>[]>
-	put<T extends RecordFields, U extends Object>(
+	put<T extends RemoteRecordFields, U extends LockedRemoteRecordFields>(
 		this: FetchObject,
 		baseId: BaseId,
 		tableId: TableId,
@@ -230,6 +260,13 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @property [baseId] {string}
 	 */
 
+	/** URL Paramters Declaration
+	 * @typedef UrlParams {Object}
+	 * @property [view] {string}
+	 * @property [fields] {string}
+	 * @property [filter] {string}
+	 */
+
 	/**
 	 * @typedef Methods {Object}
 	 * @property get {string} - GET
@@ -258,6 +295,13 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @property id {string}
 	 * @property fields {any}
 	 * @property [tableId] {string}
+	 */
+
+	/** Convert record fields to IDs options declaration
+	 * @typedef ConversionOptions {Object}
+	 * @property [fieldsOnly] {boolean}
+	 * @property [noNull] {boolean}
+	 * @property [useFieldId] {boolean}
 	 */
 
 	/** Formated a date for Airtable's Date Field
@@ -454,6 +498,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			throw new Error(`Table Id ${tableId} does not excist in base ${base.name}`)
 		return table.getField(fieldId)
 	}
+
 	/** Creates the fields for the Airtable Blocks API to create or update a record
 	 * @param tableId {string} - The Table's ID
 	 * @param fields {{[index: string]: any}} - The fields being created or updated
@@ -543,23 +588,23 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				/** Check  for empty values */
 				if (fields[key] === null || fields[key] === undefined) {
 					if (fields[key] === undefined && options?.fieldsOnly) return acc
-					if (map.fieldType == this.fieldTypes.CREATED_TIME) return acc
+					if (map.fieldType == fieldTypes.CREATED_TIME) return acc
 					if (!options || !options.noNull) acc[map.fieldId] = null
 					return acc
 				}
 				switch (map.fieldType) {
-					case this.fieldTypes.EMAIL:
-					case this.fieldTypes.URL:
-					case this.fieldTypes.MULTILINE_TEXT:
-					case this.fieldTypes.SINGLE_LINE_TEXT:
-					case this.fieldTypes.PHONE_NUMBER:
-					case this.fieldTypes.RICH_TEXT:
+					case fieldTypes.EMAIL:
+					case fieldTypes.URL:
+					case fieldTypes.MULTILINE_TEXT:
+					case fieldTypes.SINGLE_LINE_TEXT:
+					case fieldTypes.PHONE_NUMBER:
+					case fieldTypes.RICH_TEXT:
 						acc[map.fieldId] = handleString(fields[key] as string)
 						break
-					case this.fieldTypes.NUMBER:
+					case fieldTypes.NUMBER:
 						acc[map.fieldId] = Number(fields[key])
 						break
-					case this.fieldTypes.CHECKBOX:
+					case fieldTypes.CHECKBOX:
 						if (typeof fields[key] === 'string') {
 							acc[map.fieldId] = fields[key] === 'checked' ? true : false
 						} else if (typeof fields[key] === 'boolean') {
@@ -570,16 +615,16 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 							)
 						}
 						break
-					case this.fieldTypes.DATE:
+					case fieldTypes.DATE:
 						acc[map.fieldId] = handleDateTime(fields[key] as string, false)
 						break
-					case this.fieldTypes.DATE_TIME:
+					case fieldTypes.DATE_TIME:
 						acc[map.fieldId] = handleDateTime(
 							fields[key] as string | Date,
 							true
 						)
 						break
-					case this.fieldTypes.MULTIPLE_RECORD_LINKS:
+					case fieldTypes.MULTIPLE_RECORD_LINKS:
 						if (!Array.isArray(fields[key]))
 							throw new Error(key + ' is required to be an array')
 						value = fields[key] as SelectField[]
@@ -590,18 +635,18 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 							acc[map.fieldId] = value.map((r) => ({ id: r.id }))
 						}
 						break
-					case this.fieldTypes.SINGLE_COLLABORATOR:
-					case this.fieldTypes.SINGLE_SELECT:
+					case fieldTypes.SINGLE_COLLABORATOR:
+					case fieldTypes.SINGLE_SELECT:
 						value = fields[key] as string
 						acc[map.fieldId] = handleSelects(value, false)
 						break
-					case this.fieldTypes.MULTIPLE_SELECTS:
+					case fieldTypes.MULTIPLE_SELECTS:
 						acc[map.fieldId] = handleSelects(
 							fields[key] as SelectField[],
 							true
 						)
 						break
-					case this.fieldTypes.CREATED_TIME: // Acceptions
+					case fieldTypes.CREATED_TIME: // Acceptions
 						break
 					default:
 						throw new Error(`Invalid field type ${map.fieldType}`)
@@ -646,23 +691,23 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				if (value === null || value === undefined)
 					return (fieldValues[f[key]] = null)
 				switch (f.fieldType) {
-					case this.fieldTypes.NUMBER:
+					case fieldTypes.NUMBER:
 						fieldValues[f[key]] = !isNaN(Number(value))
 							? (value as number)
 							: Number(value)
 						break
-					case this.fieldTypes.RICH_TEXT:
+					case fieldTypes.RICH_TEXT:
 						fieldValues[f[key]] = value
 						break
-					case this.fieldTypes.CHECKBOX:
+					case fieldTypes.CHECKBOX:
 						fieldValues[f[key]] = value
 						break
-					case this.fieldTypes.SINGLE_SELECT:
-					case this.fieldTypes.SINGLE_COLLABORATOR:
+					case fieldTypes.SINGLE_SELECT:
+					case fieldTypes.SINGLE_COLLABORATOR:
 						fieldValues[f[key]] = value
 						break
-					case this.fieldTypes.MULTIPLE_RECORD_LINKS:
-					case this.fieldTypes.MULTIPLE_SELECTS:
+					case fieldTypes.MULTIPLE_RECORD_LINKS:
+					case fieldTypes.MULTIPLE_SELECTS:
 						fieldValues[f[key]] = Array.isArray(value) ? value : [value]
 						break
 					default:
@@ -783,40 +828,41 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		)
 	}
 
+	const fieldTypes = {
+		SINGLE_LINE_TEXT: 'singleLineText',
+		EMAIL: 'email',
+		URL: 'url',
+		MULTILINE_TEXT: 'multilineText',
+		NUMBER: 'number',
+		PERCENT: 'percent',
+		CURRENCY: 'currency',
+		SINGLE_SELECT: 'singleSelect',
+		MULTIPLE_SELECTS: 'multipleSelects',
+		SINGLE_COLLABORATOR: 'singleCollaborator',
+		MULTIPLE_COLLABORATORS: 'multipleCollaborators',
+		MULTIPLE_RECORD_LINKS: 'multipleRecordLinks',
+		DATE: 'date',
+		DATE_TIME: 'dateTime',
+		PHONE_NUMBER: 'phoneNumber',
+		MULTIPLE_ATTACHMENTS: 'multipleAttachments',
+		CHECKBOX: 'checkbox',
+		FORMULA: 'formula',
+		CREATED_TIME: 'createdTime',
+		ROLLUP: 'rollup',
+		COUNT: 'count',
+		MULTIPLE_LOOKUP_VALUES: 'multipleLookupValues',
+		AUTO_NUMBER: 'autoNumber',
+		BARCODE: 'barcode',
+		RATING: 'rating',
+		RICH_TEXT: 'richText',
+		DURATION: 'duration',
+		LAST_MODIFIED_TIME: 'lastModifiedTime',
+		CREATED_BY: 'createdBy',
+		LAST_MODIFIED_BY: 'lastModifiedBy',
+		BUTTON: 'button',
+	}
+
 	const AirtableUtils: AirtableInterface = {
-		fieldTypes: {
-			SINGLE_LINE_TEXT: 'singleLineText',
-			EMAIL: 'email',
-			URL: 'url',
-			MULTILINE_TEXT: 'multilineText',
-			NUMBER: 'number',
-			PERCENT: 'percent',
-			CURRENCY: 'currency',
-			SINGLE_SELECT: 'singleSelect',
-			MULTIPLE_SELECTS: 'multipleSelects',
-			SINGLE_COLLABORATOR: 'singleCollaborator',
-			MULTIPLE_COLLABORATORS: 'multipleCollaborators',
-			MULTIPLE_RECORD_LINKS: 'multipleRecordLinks',
-			DATE: 'date',
-			DATE_TIME: 'dateTime',
-			PHONE_NUMBER: 'phoneNumber',
-			MULTIPLE_ATTACHMENTS: 'multipleAttachments',
-			CHECKBOX: 'checkbox',
-			FORMULA: 'formula',
-			CREATED_TIME: 'createdTime',
-			ROLLUP: 'rollup',
-			COUNT: 'count',
-			MULTIPLE_LOOKUP_VALUES: 'multipleLookupValues',
-			AUTO_NUMBER: 'autoNumber',
-			BARCODE: 'barcode',
-			RATING: 'rating',
-			RICH_TEXT: 'richText',
-			DURATION: 'duration',
-			LAST_MODIFIED_TIME: 'lastModifiedTime',
-			CREATED_BY: 'createdBy',
-			LAST_MODIFIED_BY: 'lastModifiedBy',
-			BUTTON: 'button',
-		},
 		selectTable,
 		selectView,
 		selectField,
@@ -857,6 +903,24 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			// headers.append('x-api-version', this.packageVersion)
 			baseId && headers.append('x-airtable-application-id', baseId)
 			return headers
+		},
+		_createQueryPramas: function (urlParams: {
+			[index: string]: string | string[]
+		}): string {
+			if (!urlParams) return ''
+			return Object.entries(urlParams)
+				.filter(([key, value]) => value !== null && value !== undefined)
+				.map(([key, value]) => {
+					if (!value) return ''
+					if (Array.isArray(value)) {
+						return value
+							.map((v) => `${key}=${encodeURIComponent(v)}`)
+							.join('&')
+					} else {
+						return `${key}=${encodeURIComponent(value)}`
+					}
+				})
+				.join('&')
 		},
 		/** Fetch wrapper
 		 * @param path {string}
@@ -899,7 +963,10 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		 * @param payload {Object}
 		 * @param [opts] {FetchOptions}
 		 */
-		_throttleRequests: async function <T extends RecordFields, U extends Object>(
+		_throttleRequests: async function <
+			T extends RemoteRecordFields,
+			U extends Object
+		>(
 			this: FetchObject,
 			path: string,
 			method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
@@ -909,32 +976,42 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			let results = [] as RemoteRecord<T>[]
 			while (payload.length > 0) {
 				const round = payload[0]
-				let response = await this._fetch<RemoteRecord<T>, U>(
+				let response = await this._fetch<{ records: RemoteRecord<T>[] }, U>(
 					path,
 					method,
 					round,
 					opts
 				)
-				if (response) results = [...results, response]
+				if (response) results = [...results, ...response.records]
 				payload.splice(0, 1)
 			}
 			return results
 		},
-		_doUpdateRequest: async function <T extends RecordFields, U>(
+		_doUpdateRequest: async function <T extends RemoteRecordFields, U>(
 			this: FetchObject,
 			baseId: BaseId,
 			tableId: TableId,
 			method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
-			payload?: U | U[],
+			payload?: U[],
 			opts?: FetchOptions
 		): Promise<RemoteRecord<T>[]> {
 			let results: RemoteRecord<T>[] = []
 			if (payload) {
-				payload = Array.isArray(payload) ? payload : [payload]
-				const result = await this._throttleRequests<T, U>(
+				//payload = Array.isArray(payload) ? payload : [payload]
+				const _payload: { records: U[] }[] = []
+				payload.forEach((item, i) => {
+					/** Group every 10 records */
+					const index = Math.floor(i % 10)
+					if (!_payload[index]) {
+						_payload.push({ records: [item] })
+					} else {
+						_payload[index].records.push(item)
+					}
+				})
+				const result = await this._throttleRequests<T, { records: U[] }>(
 					`${baseId}/${tableId}`,
 					method,
-					payload,
+					_payload,
 					opts
 				)
 				results.push(...result)
@@ -949,7 +1026,133 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			}
 			return results
 		},
-		_convertRemoteRecords: function <T extends RecordFields>(
+		/** Creates the fields for the Airtable Blocks API to create or update a record
+		 * @param tableId {string} - The Table's ID
+		 * @param fields {{[index: string]: any}} - The fields being created or updated
+		 * @param mappings {Mappings} - The mappings for the table being updated
+		 * @param [options] {Object}
+		 * @param [options.fieldsOnly] {boolean} - Returns only the fields you passed in
+		 * @param [options.noNull] {boolean} - Exlude an null fields
+		 * @param [options.useFieldId] {boolean} - The the mappings filed IDs instead of the reference name
+		 * @returns {{[index: string]: any}}
+		 */
+		_convertRemoteRecordFieldsToIds: function (
+			tableId: TableId,
+			fields: RemoteRecordFields,
+			mappings: Mappings,
+			options?: {
+				fieldsOnly?: boolean
+				noNull?: boolean
+				useFieldId?: boolean
+			}
+		): LockedRemoteRecordFields {
+			/** Validates and returns a value for a string field */
+			function handleString(value: string | unknown): string {
+				if (typeof value === 'string') return value ? value : ''
+				if (value.toString) return value.toString()
+				return String(value)
+			}
+
+			/** Validates and returns a value for a Date / DateTime field type */
+			function handleDateTime(value: Date | string, includesTime: boolean): string {
+				/** Date Time Fields */
+				let convertedValue: string
+				if (includesTime) {
+					if (typeof value === 'string' && value.includes(' ')) {
+						// User entered date time
+						const [date, time] = value.split(' ')
+						convertedValue = getISOFormattedDateTime(date, time)
+					} else {
+						// Pre-formated date time
+						convertedValue = getISOFormattedDateTime(value, value)
+					}
+				} else {
+					convertedValue = getISOFormattedDate(value)
+				}
+				return convertedValue
+			}
+
+			const _mappings = _getFieldsInTable(tableId, mappings)
+			let newRecord /** Builds an object with the key being the field id and value the cell value */
+			newRecord = _mappings.reduce<RemoteRecordFields>((acc, map) => {
+				let key: string, value: RemoteCustomField
+				key = options?.useFieldId ? map.fieldId : map.refName
+				/** Check  for empty values */
+				if (fields[key] === null || fields[key] === undefined) {
+					if (fields[key] === undefined && options?.fieldsOnly) return acc
+					if (map.fieldType == fieldTypes.CREATED_TIME) return acc
+					if (!options || !options.noNull) acc[map.fieldId] = null
+					return acc
+				}
+				try {
+					switch (map.fieldType) {
+						case fieldTypes.EMAIL:
+						case fieldTypes.URL:
+						case fieldTypes.MULTILINE_TEXT:
+						case fieldTypes.SINGLE_LINE_TEXT:
+						case fieldTypes.PHONE_NUMBER:
+						case fieldTypes.RICH_TEXT:
+							acc[map.fieldId] = handleString(fields[key] as string)
+							break
+						case fieldTypes.NUMBER:
+							acc[map.fieldId] = Number(fields[key])
+							break
+						case fieldTypes.CHECKBOX:
+							if (typeof fields[key] === 'string') {
+								acc[map.fieldId] =
+									fields[key] === 'checked' ? true : false
+							} else if (typeof fields[key] === 'boolean') {
+								acc[map.fieldId] = fields[key]
+							} else {
+								throw new Error(
+									`Invalid checkbox value: ${fields[key]} for ${map.refName}`
+								)
+							}
+							break
+						case fieldTypes.DATE:
+							acc[map.fieldId] = handleDateTime(
+								fields[key] as string,
+								false
+							)
+							break
+						case fieldTypes.DATE_TIME:
+							acc[map.fieldId] = handleDateTime(
+								fields[key] as string | Date,
+								true
+							)
+							break
+						case fieldTypes.MULTIPLE_RECORD_LINKS:
+							if (!Array.isArray(fields[key]))
+								throw new Error(key + ' is required to be an array')
+							value = fields[key] as string[]
+							if (typeof value[0] === 'string') {
+								throw new Error(
+									'Multi Options are required to be an object'
+								)
+							} else {
+								acc[map.fieldId] = fields[key] as string[]
+							}
+							break
+						case fieldTypes.SINGLE_COLLABORATOR:
+						case fieldTypes.SINGLE_SELECT:
+							acc[map.fieldId] = fields[key] as string
+							break
+						case fieldTypes.MULTIPLE_SELECTS:
+							acc[map.fieldId] = fields[key] as string[]
+							break
+						case fieldTypes.CREATED_TIME: // Acceptions
+							break
+						default:
+							throw new Error(`Invalid field type ${map.fieldType}`)
+					}
+				} catch (error) {
+					console.error('ERROR CONVERTING FIELDS: ' + error.message)
+				}
+				return acc
+			}, {})
+			return newRecord
+		},
+		_convertRemoteRecordFieldsToNames: function <T extends RemoteRecordFields>(
 			tableId: string,
 			records: RemoteRecord<T>[],
 			mappings: Mappings,
@@ -957,7 +1160,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				useIds?: boolean
 				ignoreLinkedFields?: boolean
 			}
-		): Record<T>[] {
+		): RemoteRecord<T>[] {
 			if (!records || !records.length) return null
 			if (!mappings) throw new Error('Cannot convert remote records. No mappings.')
 			const key = opts && opts.useIds ? 'fieldId' : 'refName'
@@ -970,19 +1173,19 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 					if (value === null || value === undefined)
 						return (fieldValues[f[key]] = null)
 					switch (f.fieldType) {
-						case this.fieldTypes.NUMBER:
+						case fieldTypes.NUMBER:
 							fieldValues[f[key]] = !isNaN(Number(value))
 								? (value as number)
 								: Number(value)
 							break
-						case this.fieldTypes.CHECKBOX:
-						case this.fieldTypes.RICH_TEXT:
-						case this.fieldTypes.SINGLE_SELECT:
-						case this.fieldTypes.SINGLE_COLLABORATOR:
+						case fieldTypes.CHECKBOX:
+						case fieldTypes.RICH_TEXT:
+						case fieldTypes.SINGLE_SELECT:
+						case fieldTypes.SINGLE_COLLABORATOR:
 							fieldValues[f[key]] = value
 							break
-						case this.fieldTypes.MULTIPLE_RECORD_LINKS:
-						case this.fieldTypes.MULTIPLE_SELECTS:
+						case fieldTypes.MULTIPLE_RECORD_LINKS:
+						case fieldTypes.MULTIPLE_SELECTS:
 							fieldValues[f[key]] = Array.isArray(value) ? value : [value]
 							break
 						default:
@@ -1002,24 +1205,32 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		 * @param this {FetchObject} - The URL path
 		 * @param baseId {string}
 		 * @param tableId {string}
-		 * @param viewId {string}
-		 * @param opts {FetchOptions}
+		 * @param urlParams {UrlParams}
 		 * @returns {RemoteRecord[]}
 		 */
-		get: async function <T extends RecordFields>(
+		get: async function <T extends RemoteRecordFields>(
 			this: FetchObject,
 			baseId: BaseId,
 			tableId: TableId,
-			viewId?: ViewId
+			urlParams?: {
+				view?: ViewId
+				fields?: FieldId[]
+				filter?: string
+			}
 		): Promise<RemoteRecord<T>[]> {
-			let results: Record<T>[] = [],
+			let results: RemoteRecord<T>[] = [],
 				offset = ''
 			while (offset !== null) {
+				const queryParams = this._createQueryPramas({
+					view: urlParams?.view,
+					fields: urlParams?.fields,
+					filterByFormula: urlParams?.filter,
+				})
 				const response = await this._fetch<
-					{ records: Record<T>[]; offset: string },
+					{ records: RemoteRecord<T>[]; offset: string },
 					null
 				>(
-					`${baseId}/${tableId}?${viewId ? `view=${viewId}&` : ''}${
+					`${baseId}/${tableId}?${queryParams}${
 						offset ? 'offset=' + offset : ''
 					}`,
 					'GET',
@@ -1039,7 +1250,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		 * @param [opts] {FetchOptions}
 		 * @returns {Promise<CustomRecord[]>}
 		 */
-		post: async function <T extends RecordFields, U>(
+		post: async function <T extends RemoteRecordFields, U>(
 			this: FetchObject,
 			baseId: BaseId,
 			tableId: TableId,
@@ -1062,7 +1273,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		 * @param [opts] {FetchOptions}
 		 * @returns {Promise<CustomRecord[]>}
 		 */
-		patch: async function <T extends RecordFields, U>(
+		patch: async function <T extends RemoteRecordFields, U>(
 			this: FetchObject,
 			baseId: BaseId,
 			tableId: TableId,
@@ -1085,7 +1296,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		 * @param [opts] {FetchOptions}
 		 * @returns {Promise<CustomRecord[]>}
 		 */
-		put: async function <T extends RecordFields, U>(
+		put: async function <T extends RemoteRecordFields, U>(
 			this: FetchObject,
 			baseId: BaseId,
 			tableId: TableId,
@@ -1133,38 +1344,67 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @param baseId {string}
 	 * @param tableId {string}
 	 * @param mappings {Mappings}
-	 * @param [view] {string}
-	 * @param [fields] {string[]}
+	 * @param [urlParams] {UrlParams}
 	 * @return {Promise<CustomRecord[]>}
 	 */
-	async function getRemoteRecords<T extends RecordFields>(
+	async function getRemoteRecords<T extends RemoteRecordFields>(
 		baseId: BaseId,
 		tableId: TableId,
 		mappings: Mappings,
-		view?: ViewId,
-		fields?: FieldId[]
-	): Promise<Record<T>[]> {
-		const records = await customFetch.get<T>(baseId, tableId, view)
-		return customFetch._convertRemoteRecords<T>(tableId, records, mappings)
+		urlParams?: {
+			view?: ViewId
+			fields?: FieldId[]
+			filter?: string
+		}
+	): Promise<RemoteRecord<T>[]> {
+		const records = await customFetch.get<T>(baseId, tableId, urlParams)
+		return customFetch._convertRemoteRecordFieldsToNames<T>(
+			tableId,
+			records,
+			mappings
+		)
 	}
 	/** Gets all the records from a remote base's specified table
 	 * @param baseId {string}
 	 * @param tableId {string}
 	 * @param fields {any}
 	 * @param mappings {Mappings}
+	 * @param [options] {ConversionOptions}
 	 * @return {Promise<CustomRecord[]>}
 	 */
 	async function createRemoteRecords<
-		T extends RecordFields,
-		U extends LockedRecordFields
+		T extends RemoteRecordFields,
+		U extends RemoteRecordFields
 	>(
 		baseId: BaseId,
 		tableId: TableId,
-		fields: U[],
-		mappings: Mappings
-	): Promise<Record<T>[]> {
-		const results = await customFetch.post<T, U>(baseId, tableId, fields)
-		return customFetch._convertRemoteRecords<T>(tableId, results, mappings)
+		fields: U | U[],
+		mappings: Mappings,
+		options?: {
+			fieldsOnly?: boolean
+			noNull?: boolean
+			useFieldId?: boolean
+		}
+	): Promise<RemoteRecord<T>[]> {
+		if (!Array.isArray(fields)) fields = [fields]
+		const newRecords = fields.map((field) => ({
+			fields: customFetch._convertRemoteRecordFieldsToIds(
+				tableId,
+				field,
+				mappings,
+				options
+			),
+		}))
+		const results = await customFetch.post<T, LockedRemoteRecordFields>(
+			baseId,
+			tableId,
+			newRecords
+		)
+		return customFetch._convertRemoteRecordFieldsToNames<T>(
+			tableId,
+			results,
+			mappings
+		)
 	}
 
 	/** Gets all the records from a remote base's specified table
@@ -1172,19 +1412,38 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @param tableId {string}
 	 * @param records {{ id: string, fields: unknown }[]}
 	 * @param mappings {Mappings}
+	 * @param [options] {ConversionOptions}
 	 * @return {Promise<CustomRecord[]>}
 	 */
 	async function updateRemoteRecords<
-		T extends RecordFields,
-		U extends LockedRecordFields
+		T extends RemoteRecordFields,
+		U extends RemoteRecordFields
 	>(
 		baseId: BaseId,
 		tableId: TableId,
-		records: Record<U>[],
-		mappings: Mappings
-	): Promise<Record<T>[]> {
-		const results = await customFetch.patch<T, Record<U>>(baseId, tableId, records)
-		return customFetch._convertRemoteRecords<T>(tableId, results, mappings)
+		records: RemoteRecord<U>[],
+		mappings: Mappings,
+		options?: {
+			fieldsOnly?: boolean
+			noNull?: boolean
+			useFieldId?: boolean
+		}
+	): Promise<RemoteRecord<T>[]> {
+		const updates: RemoteRecord<LockedRemoteRecordFields>[] = records.map((rec) => ({
+			id: rec.id,
+			fields: customFetch._convertRemoteRecordFieldsToIds(
+				tableId,
+				rec.fields,
+				mappings,
+				options
+			),
+		}))
+		const results = await customFetch.patch<T>(baseId, tableId, updates)
+		return customFetch._convertRemoteRecordFieldsToNames<T>(
+			tableId,
+			results,
+			mappings
+		)
 	}
 	/** Gets all the records from a remote base's specified table
 	 * @param baseId {string}

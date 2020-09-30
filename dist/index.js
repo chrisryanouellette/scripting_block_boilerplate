@@ -1,6 +1,5 @@
 "use strict";
 
-
 /** Boilerplate for Scripting Apps
  * @param [APIKEY] {string}
  */
@@ -33,6 +32,12 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
      * @typedef FetchOptions {Object}
      * @property [baseId] {string}
      */
+    /** URL Paramters Declaration
+     * @typedef UrlParams {Object}
+     * @property [view] {string}
+     * @property [fields] {string}
+     * @property [filter] {string}
+     */
     /**
      * @typedef Methods {Object}
      * @property get {string} - GET
@@ -58,6 +63,12 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
      * @property id {string}
      * @property fields {any}
      * @property [tableId] {string}
+     */
+    /** Convert record fields to IDs options declaration
+     * @typedef ConversionOptions {Object}
+     * @property [fieldsOnly] {boolean}
+     * @property [noNull] {boolean}
+     * @property [useFieldId] {boolean}
      */
     /** Formated a date for Airtable's Date Field
      * @param [date] {string | Date} - The date to be converted
@@ -315,25 +326,25 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                 if (fields[key] === null || fields[key] === undefined) {
                     if (fields[key] === undefined && (options === null || options === void 0 ? void 0 : options.fieldsOnly))
                         return acc;
-                    if (map.fieldType == this.fieldTypes.CREATED_TIME)
+                    if (map.fieldType == fieldTypes.CREATED_TIME)
                         return acc;
                     if (!options || !options.noNull)
                         acc[map.fieldId] = null;
                     return acc;
                 }
                 switch (map.fieldType) {
-                    case this.fieldTypes.EMAIL:
-                    case this.fieldTypes.URL:
-                    case this.fieldTypes.MULTILINE_TEXT:
-                    case this.fieldTypes.SINGLE_LINE_TEXT:
-                    case this.fieldTypes.PHONE_NUMBER:
-                    case this.fieldTypes.RICH_TEXT:
+                    case fieldTypes.EMAIL:
+                    case fieldTypes.URL:
+                    case fieldTypes.MULTILINE_TEXT:
+                    case fieldTypes.SINGLE_LINE_TEXT:
+                    case fieldTypes.PHONE_NUMBER:
+                    case fieldTypes.RICH_TEXT:
                         acc[map.fieldId] = handleString(fields[key]);
                         break;
-                    case this.fieldTypes.NUMBER:
+                    case fieldTypes.NUMBER:
                         acc[map.fieldId] = Number(fields[key]);
                         break;
-                    case this.fieldTypes.CHECKBOX:
+                    case fieldTypes.CHECKBOX:
                         if (typeof fields[key] === 'string') {
                             acc[map.fieldId] = fields[key] === 'checked' ? true : false;
                         }
@@ -344,13 +355,13 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                             throw new Error(`Invalid checkbox value: ${fields[key]} for ${map.refName}`);
                         }
                         break;
-                    case this.fieldTypes.DATE:
+                    case fieldTypes.DATE:
                         acc[map.fieldId] = handleDateTime(fields[key], false);
                         break;
-                    case this.fieldTypes.DATE_TIME:
+                    case fieldTypes.DATE_TIME:
                         acc[map.fieldId] = handleDateTime(fields[key], true);
                         break;
-                    case this.fieldTypes.MULTIPLE_RECORD_LINKS:
+                    case fieldTypes.MULTIPLE_RECORD_LINKS:
                         if (!Array.isArray(fields[key]))
                             throw new Error(key + ' is required to be an array');
                         value = fields[key];
@@ -362,15 +373,15 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                             acc[map.fieldId] = value.map((r) => ({ id: r.id }));
                         }
                         break;
-                    case this.fieldTypes.SINGLE_COLLABORATOR:
-                    case this.fieldTypes.SINGLE_SELECT:
+                    case fieldTypes.SINGLE_COLLABORATOR:
+                    case fieldTypes.SINGLE_SELECT:
                         value = fields[key];
                         acc[map.fieldId] = handleSelects(value, false);
                         break;
-                    case this.fieldTypes.MULTIPLE_SELECTS:
+                    case fieldTypes.MULTIPLE_SELECTS:
                         acc[map.fieldId] = handleSelects(fields[key], true);
                         break;
-                    case this.fieldTypes.CREATED_TIME: // Acceptions
+                    case fieldTypes.CREATED_TIME: // Acceptions
                         break;
                     default:
                         throw new Error(`Invalid field type ${map.fieldType}`);
@@ -409,23 +420,23 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                 if (value === null || value === undefined)
                     return (fieldValues[f[key]] = null);
                 switch (f.fieldType) {
-                    case this.fieldTypes.NUMBER:
+                    case fieldTypes.NUMBER:
                         fieldValues[f[key]] = !isNaN(Number(value))
                             ? value
                             : Number(value);
                         break;
-                    case this.fieldTypes.RICH_TEXT:
+                    case fieldTypes.RICH_TEXT:
                         fieldValues[f[key]] = value;
                         break;
-                    case this.fieldTypes.CHECKBOX:
+                    case fieldTypes.CHECKBOX:
                         fieldValues[f[key]] = value;
                         break;
-                    case this.fieldTypes.SINGLE_SELECT:
-                    case this.fieldTypes.SINGLE_COLLABORATOR:
+                    case fieldTypes.SINGLE_SELECT:
+                    case fieldTypes.SINGLE_COLLABORATOR:
                         fieldValues[f[key]] = value;
                         break;
-                    case this.fieldTypes.MULTIPLE_RECORD_LINKS:
-                    case this.fieldTypes.MULTIPLE_SELECTS:
+                    case fieldTypes.MULTIPLE_RECORD_LINKS:
+                    case fieldTypes.MULTIPLE_SELECTS:
                         fieldValues[f[key]] = Array.isArray(value) ? value : [value];
                         break;
                     default:
@@ -511,40 +522,40 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
         const table = this.selectTable(base, tableId);
         return _throttleTableUsage(recordsIds, (r) => table.deleteRecordsAsync(r));
     }
+    const fieldTypes = {
+        SINGLE_LINE_TEXT: 'singleLineText',
+        EMAIL: 'email',
+        URL: 'url',
+        MULTILINE_TEXT: 'multilineText',
+        NUMBER: 'number',
+        PERCENT: 'percent',
+        CURRENCY: 'currency',
+        SINGLE_SELECT: 'singleSelect',
+        MULTIPLE_SELECTS: 'multipleSelects',
+        SINGLE_COLLABORATOR: 'singleCollaborator',
+        MULTIPLE_COLLABORATORS: 'multipleCollaborators',
+        MULTIPLE_RECORD_LINKS: 'multipleRecordLinks',
+        DATE: 'date',
+        DATE_TIME: 'dateTime',
+        PHONE_NUMBER: 'phoneNumber',
+        MULTIPLE_ATTACHMENTS: 'multipleAttachments',
+        CHECKBOX: 'checkbox',
+        FORMULA: 'formula',
+        CREATED_TIME: 'createdTime',
+        ROLLUP: 'rollup',
+        COUNT: 'count',
+        MULTIPLE_LOOKUP_VALUES: 'multipleLookupValues',
+        AUTO_NUMBER: 'autoNumber',
+        BARCODE: 'barcode',
+        RATING: 'rating',
+        RICH_TEXT: 'richText',
+        DURATION: 'duration',
+        LAST_MODIFIED_TIME: 'lastModifiedTime',
+        CREATED_BY: 'createdBy',
+        LAST_MODIFIED_BY: 'lastModifiedBy',
+        BUTTON: 'button',
+    };
     const AirtableUtils = {
-        fieldTypes: {
-            SINGLE_LINE_TEXT: 'singleLineText',
-            EMAIL: 'email',
-            URL: 'url',
-            MULTILINE_TEXT: 'multilineText',
-            NUMBER: 'number',
-            PERCENT: 'percent',
-            CURRENCY: 'currency',
-            SINGLE_SELECT: 'singleSelect',
-            MULTIPLE_SELECTS: 'multipleSelects',
-            SINGLE_COLLABORATOR: 'singleCollaborator',
-            MULTIPLE_COLLABORATORS: 'multipleCollaborators',
-            MULTIPLE_RECORD_LINKS: 'multipleRecordLinks',
-            DATE: 'date',
-            DATE_TIME: 'dateTime',
-            PHONE_NUMBER: 'phoneNumber',
-            MULTIPLE_ATTACHMENTS: 'multipleAttachments',
-            CHECKBOX: 'checkbox',
-            FORMULA: 'formula',
-            CREATED_TIME: 'createdTime',
-            ROLLUP: 'rollup',
-            COUNT: 'count',
-            MULTIPLE_LOOKUP_VALUES: 'multipleLookupValues',
-            AUTO_NUMBER: 'autoNumber',
-            BARCODE: 'barcode',
-            RATING: 'rating',
-            RICH_TEXT: 'richText',
-            DURATION: 'duration',
-            LAST_MODIFIED_TIME: 'lastModifiedTime',
-            CREATED_BY: 'createdBy',
-            LAST_MODIFIED_BY: 'lastModifiedBy',
-            BUTTON: 'button',
-        },
         selectTable,
         selectView,
         selectField,
@@ -584,6 +595,25 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
             // headers.append('x-api-version', this.packageVersion)
             baseId && headers.append('x-airtable-application-id', baseId);
             return headers;
+        },
+        _createQueryPramas: function (urlParams) {
+            if (!urlParams)
+                return '';
+            return Object.entries(urlParams)
+                .filter(([key, value]) => value !== null && value !== undefined)
+                .map(([key, value]) => {
+                if (!value)
+                    return '';
+                if (Array.isArray(value)) {
+                    return value
+                        .map((v) => `${key}=${encodeURIComponent(v)}`)
+                        .join('&');
+                }
+                else {
+                    return `${key}=${encodeURIComponent(value)}`;
+                }
+            })
+                .join('&');
         },
         /** Fetch wrapper
          * @param path {string}
@@ -625,7 +655,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                     const round = payload[0];
                     let response = yield this._fetch(path, method, round, opts);
                     if (response)
-                        results = [...results, response];
+                        results = [...results, ...response.records];
                     payload.splice(0, 1);
                 }
                 return results;
@@ -635,8 +665,19 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
             return __awaiter(this, void 0, void 0, function* () {
                 let results = [];
                 if (payload) {
-                    payload = Array.isArray(payload) ? payload : [payload];
-                    const result = yield this._throttleRequests(`${baseId}/${tableId}`, method, payload, opts);
+                    //payload = Array.isArray(payload) ? payload : [payload]
+                    const _payload = [];
+                    payload.forEach((item, i) => {
+                        /** Group every 10 records */
+                        const index = Math.floor(i % 10);
+                        if (!_payload[index]) {
+                            _payload.push({ records: [item] });
+                        }
+                        else {
+                            _payload[index].records.push(item);
+                        }
+                    });
+                    const result = yield this._throttleRequests(`${baseId}/${tableId}`, method, _payload, opts);
                     results.push(...result);
                 }
                 else {
@@ -646,7 +687,123 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                 return results;
             });
         },
-        _convertRemoteRecords: function (tableId, records, mappings, opts) {
+        /** Creates the fields for the Airtable Blocks API to create or update a record
+         * @param tableId {string} - The Table's ID
+         * @param fields {{[index: string]: any}} - The fields being created or updated
+         * @param mappings {Mappings} - The mappings for the table being updated
+         * @param [options] {Object}
+         * @param [options.fieldsOnly] {boolean} - Returns only the fields you passed in
+         * @param [options.noNull] {boolean} - Exlude an null fields
+         * @param [options.useFieldId] {boolean} - The the mappings filed IDs instead of the reference name
+         * @returns {{[index: string]: any}}
+         */
+        _convertRemoteRecordFieldsToIds: function (tableId, fields, mappings, options) {
+            /** Validates and returns a value for a string field */
+            function handleString(value) {
+                if (typeof value === 'string')
+                    return value ? value : '';
+                if (value.toString)
+                    return value.toString();
+                return String(value);
+            }
+            /** Validates and returns a value for a Date / DateTime field type */
+            function handleDateTime(value, includesTime) {
+                /** Date Time Fields */
+                let convertedValue;
+                if (includesTime) {
+                    if (typeof value === 'string' && value.includes(' ')) {
+                        // User entered date time
+                        const [date, time] = value.split(' ');
+                        convertedValue = getISOFormattedDateTime(date, time);
+                    }
+                    else {
+                        // Pre-formated date time
+                        convertedValue = getISOFormattedDateTime(value, value);
+                    }
+                }
+                else {
+                    convertedValue = getISOFormattedDate(value);
+                }
+                return convertedValue;
+            }
+            const _mappings = _getFieldsInTable(tableId, mappings);
+            let newRecord; /** Builds an object with the key being the field id and value the cell value */
+            newRecord = _mappings.reduce((acc, map) => {
+                let key, value;
+                key = (options === null || options === void 0 ? void 0 : options.useFieldId) ? map.fieldId : map.refName;
+                /** Check  for empty values */
+                if (fields[key] === null || fields[key] === undefined) {
+                    if (fields[key] === undefined && (options === null || options === void 0 ? void 0 : options.fieldsOnly))
+                        return acc;
+                    if (map.fieldType == fieldTypes.CREATED_TIME)
+                        return acc;
+                    if (!options || !options.noNull)
+                        acc[map.fieldId] = null;
+                    return acc;
+                }
+                try {
+                    switch (map.fieldType) {
+                        case fieldTypes.EMAIL:
+                        case fieldTypes.URL:
+                        case fieldTypes.MULTILINE_TEXT:
+                        case fieldTypes.SINGLE_LINE_TEXT:
+                        case fieldTypes.PHONE_NUMBER:
+                        case fieldTypes.RICH_TEXT:
+                            acc[map.fieldId] = handleString(fields[key]);
+                            break;
+                        case fieldTypes.NUMBER:
+                            acc[map.fieldId] = Number(fields[key]);
+                            break;
+                        case fieldTypes.CHECKBOX:
+                            if (typeof fields[key] === 'string') {
+                                acc[map.fieldId] =
+                                    fields[key] === 'checked' ? true : false;
+                            }
+                            else if (typeof fields[key] === 'boolean') {
+                                acc[map.fieldId] = fields[key];
+                            }
+                            else {
+                                throw new Error(`Invalid checkbox value: ${fields[key]} for ${map.refName}`);
+                            }
+                            break;
+                        case fieldTypes.DATE:
+                            acc[map.fieldId] = handleDateTime(fields[key], false);
+                            break;
+                        case fieldTypes.DATE_TIME:
+                            acc[map.fieldId] = handleDateTime(fields[key], true);
+                            break;
+                        case fieldTypes.MULTIPLE_RECORD_LINKS:
+                            if (!Array.isArray(fields[key]))
+                                throw new Error(key + ' is required to be an array');
+                            value = fields[key];
+                            if (typeof value[0] === 'string') {
+                                throw new Error('Multi Options are required to be an object');
+                            }
+                            else {
+                                acc[map.fieldId] = fields[key];
+                            }
+                            break;
+                        case fieldTypes.SINGLE_COLLABORATOR:
+                        case fieldTypes.SINGLE_SELECT:
+                            acc[map.fieldId] = fields[key];
+                            break;
+                        case fieldTypes.MULTIPLE_SELECTS:
+                            acc[map.fieldId] = fields[key];
+                            break;
+                        case fieldTypes.CREATED_TIME: // Acceptions
+                            break;
+                        default:
+                            throw new Error(`Invalid field type ${map.fieldType}`);
+                    }
+                }
+                catch (error) {
+                    console.error('ERROR CONVERTING FIELDS: ' + error.message);
+                }
+                return acc;
+            }, {});
+            return newRecord;
+        },
+        _convertRemoteRecordFieldsToNames: function (tableId, records, mappings, opts) {
             if (!records || !records.length)
                 return null;
             if (!mappings)
@@ -662,19 +819,19 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
                     if (value === null || value === undefined)
                         return (fieldValues[f[key]] = null);
                     switch (f.fieldType) {
-                        case this.fieldTypes.NUMBER:
+                        case fieldTypes.NUMBER:
                             fieldValues[f[key]] = !isNaN(Number(value))
                                 ? value
                                 : Number(value);
                             break;
-                        case this.fieldTypes.CHECKBOX:
-                        case this.fieldTypes.RICH_TEXT:
-                        case this.fieldTypes.SINGLE_SELECT:
-                        case this.fieldTypes.SINGLE_COLLABORATOR:
+                        case fieldTypes.CHECKBOX:
+                        case fieldTypes.RICH_TEXT:
+                        case fieldTypes.SINGLE_SELECT:
+                        case fieldTypes.SINGLE_COLLABORATOR:
                             fieldValues[f[key]] = value;
                             break;
-                        case this.fieldTypes.MULTIPLE_RECORD_LINKS:
-                        case this.fieldTypes.MULTIPLE_SELECTS:
+                        case fieldTypes.MULTIPLE_RECORD_LINKS:
+                        case fieldTypes.MULTIPLE_SELECTS:
                             fieldValues[f[key]] = Array.isArray(value) ? value : [value];
                             break;
                         default:
@@ -694,15 +851,19 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
          * @param this {FetchObject} - The URL path
          * @param baseId {string}
          * @param tableId {string}
-         * @param viewId {string}
-         * @param opts {FetchOptions}
+         * @param urlParams {UrlParams}
          * @returns {RemoteRecord[]}
          */
-        get: function (baseId, tableId, viewId) {
+        get: function (baseId, tableId, urlParams) {
             return __awaiter(this, void 0, void 0, function* () {
                 let results = [], offset = '';
                 while (offset !== null) {
-                    const response = yield this._fetch(`${baseId}/${tableId}?${viewId ? `view=${viewId}&` : ''}${offset ? 'offset=' + offset : ''}`, 'GET', null, { baseId });
+                    const queryParams = this._createQueryPramas({
+                        view: urlParams === null || urlParams === void 0 ? void 0 : urlParams.view,
+                        fields: urlParams === null || urlParams === void 0 ? void 0 : urlParams.fields,
+                        filterByFormula: urlParams === null || urlParams === void 0 ? void 0 : urlParams.filter,
+                    });
+                    const response = yield this._fetch(`${baseId}/${tableId}?${queryParams}${offset ? 'offset=' + offset : ''}`, 'GET', null, { baseId });
                     offset = response.offset ? response.offset : null;
                     results.push(...response.records);
                 }
@@ -773,14 +934,13 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
      * @param baseId {string}
      * @param tableId {string}
      * @param mappings {Mappings}
-     * @param [view] {string}
-     * @param [fields] {string[]}
+     * @param [urlParams] {UrlParams}
      * @return {Promise<CustomRecord[]>}
      */
-    function getRemoteRecords(baseId, tableId, mappings, view, fields) {
+    function getRemoteRecords(baseId, tableId, mappings, urlParams) {
         return __awaiter(this, void 0, void 0, function* () {
-            const records = yield customFetch.get(baseId, tableId, view);
-            return customFetch._convertRemoteRecords(tableId, records, mappings);
+            const records = yield customFetch.get(baseId, tableId, urlParams);
+            return customFetch._convertRemoteRecordFieldsToNames(tableId, records, mappings);
         });
     }
     /** Gets all the records from a remote base's specified table
@@ -788,12 +948,18 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
      * @param tableId {string}
      * @param fields {any}
      * @param mappings {Mappings}
+     * @param [options] {ConversionOptions}
      * @return {Promise<CustomRecord[]>}
      */
-    function createRemoteRecords(baseId, tableId, fields, mappings) {
+    function createRemoteRecords(baseId, tableId, fields, mappings, options) {
         return __awaiter(this, void 0, void 0, function* () {
-            const results = yield customFetch.post(baseId, tableId, fields);
-            return customFetch._convertRemoteRecords(tableId, results, mappings);
+            if (!Array.isArray(fields))
+                fields = [fields];
+            const newRecords = fields.map((field) => ({
+                fields: customFetch._convertRemoteRecordFieldsToIds(tableId, field, mappings, options),
+            }));
+            const results = yield customFetch.post(baseId, tableId, newRecords);
+            return customFetch._convertRemoteRecordFieldsToNames(tableId, results, mappings);
         });
     }
     /** Gets all the records from a remote base's specified table
@@ -801,12 +967,17 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
      * @param tableId {string}
      * @param records {{ id: string, fields: unknown }[]}
      * @param mappings {Mappings}
+     * @param [options] {ConversionOptions}
      * @return {Promise<CustomRecord[]>}
      */
-    function updateRemoteRecords(baseId, tableId, records, mappings) {
+    function updateRemoteRecords(baseId, tableId, records, mappings, options) {
         return __awaiter(this, void 0, void 0, function* () {
-            const results = yield customFetch.patch(baseId, tableId, records);
-            return customFetch._convertRemoteRecords(tableId, results, mappings);
+            const updates = records.map((rec) => ({
+                id: rec.id,
+                fields: customFetch._convertRemoteRecordFieldsToIds(tableId, rec.fields, mappings, options),
+            }));
+            const results = yield customFetch.patch(baseId, tableId, updates);
+            return customFetch._convertRemoteRecordFieldsToNames(tableId, results, mappings);
         });
     }
     /** Gets all the records from a remote base's specified table

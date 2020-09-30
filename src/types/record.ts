@@ -1,4 +1,4 @@
-import { FieldId, TableId } from "./table";
+import { FieldId, TableId } from './table'
 
 export interface CollaboratorData {
 	id: string
@@ -35,8 +35,8 @@ export interface SelectField {
 	color?: string
 }
 
-export type CustomField = 
-	string
+export type CustomField =
+	| string
 	| SelectField
 	| SelectField[]
 	| number
@@ -47,11 +47,11 @@ export type CustomField =
 export type RecordId = string
 
 export interface RecordFields {
-	[ index: string ]: CustomField
+	[index: string]: CustomField
 }
 
 export interface LockedRecordFields {
-	readonly [ index: string ]: CustomField
+	readonly [index: string]: CustomField
 }
 
 export interface Record<T extends RecordFields> {
@@ -61,7 +61,17 @@ export interface Record<T extends RecordFields> {
 	tableId?: TableId
 }
 
-export interface RemoteRecord<T extends RecordFields> {
+export interface LockedRemoteRecordFields {
+	readonly [index: string]: RemoteCustomField
+}
+
+export type RemoteCustomField = string | string[] | number | boolean | Attachment
+
+export interface RemoteRecordFields {
+	[index: string]: RemoteCustomField
+}
+
+export interface RemoteRecord<T extends RemoteRecordFields> {
 	id: RecordId
 	fields: T
 	tableId?: TableId
