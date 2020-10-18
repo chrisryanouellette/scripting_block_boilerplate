@@ -13,6 +13,7 @@ import {
 	RemoteCustomField,
 	RemoteRecordFields,
 	LockedRemoteRecordFields,
+	Attachment,
 } from './types/record'
 import {
 	Field,
@@ -29,6 +30,7 @@ import { FetchOptions } from './types/fetch'
 interface ConverterInterface {
 	getFormatedDate(date?: string | Date): string
 	getFormatedTime(time?: string | Date, opts?: { military: boolean }): string
+	getTimestamp(timeZoneOffset: number): string
 	getISOFormattedDate(date: string | Date): string
 	getISOFormattedDateTime(date: string | Date, time: string | Date): string
 }
@@ -308,10 +310,23 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @param [date] {string | Date} - The date to be converted
 	 * @returns {string}
 	 */
+
+	/** A Airtable View
+	 * @typedef View {Object}
+	 * @property id {string}
+	 * @property name {string}
+	 * @property selectRecordsAsync {function(): Promise<{recordIds: string[], records: Record[], getRecord(id: string): Record}>}
+	 */
+
 	function getFormatedDate(date?: string | Date): string {
 		let _date: Date
 		if (typeof date === 'string') {
-			_date = new Date(date)
+			if (date.includes(' ')) {
+				_date = new Date(date.split(' ')[0])
+			} else {
+				_date = new Date(date)
+			}
+			_date.setTime(_date.getTime() + _date.getTimezoneOffset() * 60000)
 		} else if (date) {
 			_date = date
 		} else if (!date) {
@@ -322,30 +337,54 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	}
 
 	/** @param [time] {string | Date} - The Time to be converted
-	 * 	@param [opts] {{military: boolean}} - Should be returned in military time
+	 * 	@param [opts] {Object} - Should be returned in military time
+	 * 	@param [opts.military] {boolean} - Should be returned in military time
+	 * 	@param [opts.offset] {number} - The time zone offset in hours
 	 * @returns {string}
 	 */
-	function getFormatedTime(time?: string | Date, opts?: { military: boolean }): string {
+	function getFormatedTime(
+		time?: string | Date,
+		opts?: { military?: boolean; offset?: number }
+	): string {
 		let _time: Date
 		if (typeof time === 'string') {
+			time = time.toLowerCase()
 			if (time.includes('am') || time.includes('pm')) {
-				time = time.toLowerCase()
+				/** Remove potential date */
+				if (time.length > 8 && time.includes(' ')) time = time.split(' ')[1]
+				time = time.replace(/ /g, '')
 				time = time.substring(0, time.indexOf(':') + 3) + ' ' + time.slice(-2)
-				_time = new Date('01/01/1970 ' + time)
+				_time = new Date(getFormatedDate() + ' ' + time)
 			} else {
 				_time = new Date(time)
 			}
-		} else if (time) {
+		} else if (time instanceof Date) {
 			_time = time
 		} else if (!time) {
 			_time = new Date()
 		}
-		if (isNaN(Number(_time.getTime()))) throw new Error(`ERROR: Invalid date ${time}`)
-		const hour = _time.getHours()
-		const minute = _time.getMinutes()
-		return opts?.military
-			? `${hour}:${minute}`
-			: `${hour <= 12 ? hour : hour - 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`
+		if (isNaN(Number(_time.getTime()))) throw new Error(`ERROR: Invalid time ${time}`)
+		if (opts?.offset) {
+			const timeZoneOffset = opts.offset * (1000 * 60 * 60)
+			_time.setTime(_time.getTime() + timeZoneOffset)
+		}
+		let hour = _time.getHours()
+		let minute: string | number = _time.getMinutes().toString()
+		if (opts?.military) {
+			return `${hour}:${minute}`
+		} else {
+			let AP_PM = hour < 12 ? 'AM' : 'PM'
+			if (hour === 0) hour = 12
+			if (hour > 12) hour = hour - 12
+			if (Number(minute) < 10) minute = '0' + minute
+			return `${hour}:${minute} ${AP_PM}`
+		}
+	}
+
+	function getTimestamp(timeZoneOffset: number): string {
+		const date = new Date()
+		date.setTime(date.getTime() - 1000 * 60 * 60 * timeZoneOffset)
+		return date.toLocaleTimeString()
 	}
 
 	/** Returns a date in ISO format
@@ -360,17 +399,23 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	/** Returns a date in ISO format
 	 * @param [date] {string | Date}
 	 * @param [time] {string | Date}
+	 * @param [offset] {number}
 	 * @returns {string}
 	 */
-	function getISOFormattedDateTime(date?: string | Date, time?: string | Date): string {
+	function getISOFormattedDateTime(
+		date?: string | Date,
+		time?: string | Date,
+		offset?: number
+	): string {
 		const _date = getFormatedDate(date)
-		const _time = getFormatedTime(time, { military: true })
+		const _time = getFormatedTime(time, { military: true, offset: offset })
 		return new Date(`${_date} ${_time}`).toISOString()
 	}
 
 	const Converter: ConverterInterface = {
 		getFormatedDate,
 		getFormatedTime,
+		getTimestamp,
 		getISOFormattedDate,
 		getISOFormattedDateTime,
 	}
@@ -481,6 +526,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @param base {Base} - Global Base Object
 	 * @param tableId {string} - The Table the view is in
 	 * @param viewId {string} - The view you want
+	 * @returns {View}
 	 */
 	function selectView(base: Base, tableId: TableId, viewId: ViewId): View {
 		const table = this.selectTable(base, tableId)
@@ -578,6 +624,15 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			}
 		}
 
+		function handleAttachment(values: Attachment[]): Attachment[] {
+			if(!values?.length) throw new Error('Attchements array is empty')
+			return values.map(value => {
+				if(!value.url)
+					throw new Error('Invalid Attachment. Missing URL or FileName') 
+				return value
+			})
+		}
+
 		const _mappings = _getFieldsInTable(tableId, mappings)
 		let newRecord: RecordFields
 		try {
@@ -637,14 +692,16 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 						break
 					case fieldTypes.SINGLE_COLLABORATOR:
 					case fieldTypes.SINGLE_SELECT:
-						value = fields[key] as string
-						acc[map.fieldId] = handleSelects(value, false)
+						acc[map.fieldId] = handleSelects(fields[key] as string, false)
 						break
 					case fieldTypes.MULTIPLE_SELECTS:
 						acc[map.fieldId] = handleSelects(
 							fields[key] as SelectField[],
 							true
 						)
+						break
+					case fieldTypes.MULTIPLE_ATTACHMENTS:
+						acc[map.fieldId] = handleAttachment(fields[key] as Attachment[])
 						break
 					case fieldTypes.CREATED_TIME: // Acceptions
 						break
@@ -708,6 +765,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 						break
 					case fieldTypes.MULTIPLE_RECORD_LINKS:
 					case fieldTypes.MULTIPLE_SELECTS:
+					case fieldTypes.MULTIPLE_ATTACHMENTS:
 						fieldValues[f[key]] = Array.isArray(value) ? value : [value]
 						break
 					default:
@@ -728,7 +786,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @param base {Base} - Global Base Object
 	 * @param tableIdOrName {string} - The Table name or ID
 	 * @param [fields] {string[]} - The fields you want loaded. null / undefined for all fields
-	 * @param [sorts] {Object} - How to sort the returned records
+	 * @param [sorts] {Object[]} - How to sort the returned records
 	 * @param [sorts.field] {string} - The field ID to sort by
 	 * @param [sorts.direction] {string} - The direction to sort. Either asc | desc
 	 * @param [color] {string}
