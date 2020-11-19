@@ -18,6 +18,7 @@ import {
 import {
 	Field,
 	FieldId,
+	NewTable,
 	QueryResult,
 	RecordSelectOptions,
 	Table,
@@ -28,11 +29,29 @@ import {
 import { FetchOptions } from './types/fetch'
 
 interface ConverterInterface {
-	getFormatedDate(date?: string | Date): string
-	getFormatedTime(time?: string | Date, opts?: { military: boolean }): string
-	getTimestamp(timeZoneOffset: number): string
-	getISOFormattedDate(date: string | Date): string
-	getISOFormattedDateTime(date: string | Date, time: string | Date): string
+	getFormatedDate(
+		date?: string | Date,
+		opts?: { military: boolean; asLocalString: boolean; asISOString: boolean }
+	): string
+	getFormatedTime(
+		time?: string | Date,
+		opts?: {
+			military: boolean
+			asLocalString: boolean
+			asISOString: boolean
+			asUTCString: boolean
+		}
+	): string
+	getFormatedDateTime(
+		dateTime?: string | Date,
+		opts?: {
+			asISOString?: boolean
+			military?: boolean
+			asLocalString?: boolean
+			asUTCString: boolean
+		}
+	): string
+	getTimestamp(timeZoneOffset: number | boolean): string
 }
 
 interface UtilsInterface {
@@ -43,6 +62,7 @@ interface AirtableInterface {
 	selectTable(base: Base, tableId: TableId): Table
 	selectView(base: Base, tableId: TableId, viewId: ViewId): View
 	selectField(base: Base, tableId: TableId, fieldId: FieldId): Field
+	getMappings(tableId: TableId, mappings: Mappings, refNames?: string[]): Mapping[]
 	convertRecordFieldsToIds(
 		tableId: TableId,
 		fields: RecordFields,
@@ -91,6 +111,7 @@ interface AirtableInterface {
 }
 
 interface RemoteConnectionInterface {
+	createTable(tableData: NewTable[]): Promise<void>
 	getRecords<T extends RemoteRecordFields>(
 		baseId: BaseId,
 		tableId: TableId,
@@ -240,11 +261,20 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	APIKEY?: string
 ): Utilties {
 	/** Airtable Scripting Block Utitilies
-	 * VERSION: 0.0.2
+	 * VERSION: 0.0.3
 	 */
 
 	/** Mappings Type Deffinitions
 	 * @typedef Mappings {any}
+	 */
+
+	/** Mapping
+	 * @typedef Mapping {Object}
+	 * @property tableId {string}
+	 * @property fieldId {string}
+	 * @property refName {string}
+	 * @property fieldName {string}
+	 * @property feildType {string}
 	 */
 
 	/** Fetch Class Type Definition
@@ -269,13 +299,31 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @property [filter] {string}
 	 */
 
-	/**
+	/** HTTP Methods Object
 	 * @typedef Methods {Object}
 	 * @property get {string} - GET
 	 * @property post {string} - POST
 	 * @property patch {string} - PATCH
 	 * @property put {string} - PUT
 	 * @property delete {string} - DELETE
+	 */
+
+	/** Select Option
+	 * @typedef SelectOption {Object}
+	 * @property [SelectOption.id] {string}
+	 * @property [SelectOption.name] {string}
+	 * @property [SelectOption.color] {string}
+	 */
+
+	/** Fields Declaration
+	 * @typedef Field {Object}
+	 * @property id {string}
+	 * @property name {string}
+	 * @property type {string}
+	 * @property isComputed {boolean}
+	 * @property isPrimaryField {boolean}
+	 * @property [options] {Object}
+	 * @property [options.choices] {SelectOption[]}
 	 */
 
 	/** Custom Record Type Declaration
@@ -306,78 +354,218 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	 * @property [useFieldId] {boolean}
 	 */
 
-	/** Formated a date for Airtable's Date Field
-	 * @param [date] {string | Date} - The date to be converted
+	/** The data reuqired to make a table
+	 * @typedef NewTableData {Object}
+	 * @property NewTableData.name {string}
+	 * @property NewTableData.fields {NewTableFields}
+	 * @property NewTableData.baseId {string}
+	 *
+	 * @typedef NewTableFields {Object}
+	 * @property NewTableFields.type {string}
+	 * @property NewTableFields.name {string}
+	 */
+
+	/** Checks if a date is valid
+	 * @param date {Date}
+	 * @returns {boolean}
+	 */
+	function _isVaidDate(date: Date): boolean {
+		if (!(date instanceof Date)) throw new Error(`Invalid Date ( Not of type Date )`)
+		if (isNaN(Number(date.getTime()))) throw new Error(`Invlaid Date ${date}`)
+		return true
+	}
+
+	/** Formates a number for a date
+	 * @param num {number}
 	 * @returns {string}
 	 */
+	function _formatNumber(num: number): string {
+		return num < 10 ? '0' + num : num.toString()
+	}
 
-	/** A Airtable View
-	 * @typedef View {Object}
-	 * @property id {string}
-	 * @property name {string}
-	 * @property selectRecordsAsync {function(): Promise<{recordIds: string[], records: Record[], getRecord(id: string): Record}>}
+	/** Formats a Date for a User
+	 * @param [date] {string | Date}
+	 * @param [opts] {Object}
+	 * @param [opts.asISOString] {boolean}
+	 * @param [opts.asLocalString] {boolean}
 	 */
-
-	function getFormatedDate(date?: string | Date): string {
-		let _date: Date
-		if (typeof date === 'string') {
-			if (date.includes(' ')) {
-				_date = new Date(date.split(' ')[0])
-			} else {
-				_date = new Date(date)
-			}
-			_date.setTime(_date.getTime() + _date.getTimezoneOffset() * 60000)
-		} else if (date) {
-			_date = date
-		} else if (!date) {
-			_date = new Date()
+	function getFormatedDate(
+		date?: string | Date,
+		opts?: {
+			asISOString?: boolean
+			asLocalString?: boolean
 		}
-		if (isNaN(Number(_date.getTime()))) throw new Error(`ERROR: Invalid date ${date}`)
-		return `${_date.getMonth() + 1}/${_date.getDate()}/${_date.getFullYear()}`
+	): string {
+		let _date: Date = null
+		if (!date) {
+			_date = new Date()
+		} else if (!(date instanceof Date)) {
+			if (typeof date !== 'string') {
+				throw new Error(
+					`Only strings and Date Objects are valid for formDate function. Recieved ${date}`
+				)
+			}
+			_date = new Date(date.split(' ')[0].replace(/-/g, '/'))
+			_isVaidDate(_date)
+		} else {
+			_isVaidDate(date)
+			_date = date
+		}
+		const day = _formatNumber(_date.getDate())
+		const month = _formatNumber(_date.getMonth() + 1)
+		const year = _date.getFullYear()
+		if (opts?.asISOString) return _date.toISOString()
+		if (opts?.asLocalString)
+			return _date.toLocaleDateString('en-US', {
+				timeZone: 'America/New_York',
+			})
+		return `${month}-${day}-${year}`
 	}
 
 	/** @param [time] {string | Date} - The Time to be converted
 	 * 	@param [opts] {Object} - Should be returned in military time
 	 * 	@param [opts.military] {boolean} - Should be returned in military time
-	 * 	@param [opts.offset] {number} - The time zone offset in hours
-	 * @returns {string}
+	 *  @param [opts.asISOString] {boolean}
+	 *  @param [opts.asLocalString] {boolean}
+	 *  @param [opts.asUTCString] {boolean}
+	 *  @returns {string}
 	 */
 	function getFormatedTime(
 		time?: string | Date,
-		opts?: { military?: boolean; offset?: number }
+		opts?: {
+			asISOString?: boolean
+			military: boolean
+			asLocalString?: boolean
+			asUTCString: boolean
+		}
 	): string {
-		let _time: Date
-		if (typeof time === 'string') {
-			time = time.toLowerCase()
-			if (time.includes('am') || time.includes('pm')) {
-				/** Remove potential date */
-				if (time.length > 8 && time.includes(' ')) time = time.split(' ')[1]
-				time = time.replace(/ /g, '')
-				time = time.substring(0, time.indexOf(':') + 3) + ' ' + time.slice(-2)
-				_time = new Date(getFormatedDate() + ' ' + time)
-			} else {
-				_time = new Date(time)
+		let _date: Date = null
+		if (!time) {
+			_date = new Date()
+		} else if (!(time instanceof Date)) {
+			if (typeof time !== 'string') {
+				throw new Error(
+					`Only strings and Date Objects are valid for formatTime function. Recieved ${time}`
+				)
 			}
-		} else if (time instanceof Date) {
-			_time = time
-		} else if (!time) {
-			_time = new Date()
-		}
-		if (isNaN(Number(_time.getTime()))) throw new Error(`ERROR: Invalid time ${time}`)
-		if (opts?.offset) {
-			const timeZoneOffset = opts.offset * (1000 * 60 * 60)
-			_time.setTime(_time.getTime() + timeZoneOffset)
-		}
-		let hour = _time.getHours()
-		let minute: string | number = _time.getMinutes().toString()
-		if (opts?.military) {
-			return `${hour}:${minute}`
+			if (time.includes('/') || time.includes('-')) {
+				time = time.substring(time.indexOf(' ') + 1)
+			}
+			if (/^\d+([: A-Za-z\d])+/g.test(time)) {
+				/** Shorthand Time with label ( 1p ) */
+				const label = time.toLowerCase().includes('p') ? true : false
+				time = time.toLowerCase().replace(/[a-z ]/g, '')
+				if (time.includes(':')) {
+					const [hour, minutes] = time.split(':')
+					time = `${
+						label && Number(hour) !== 12 ? Number(hour) + 12 : hour
+					}:${minutes}`
+				} else if (label && Number(time) < 12) {
+					time = (Number(time) + 12).toString()
+				} else if (!label && Number(time) === 12) {
+					time = '0'
+				}
+			}
+			if (!time.includes(':')) {
+				/** Shorthand time without label */
+				const timeAsNumber = Number(time)
+				if (isNaN(timeAsNumber)) throw new Error(`Invalid Time ${time}`)
+				if (timeAsNumber < 10) {
+					time = `0${timeAsNumber}:00`
+				} else {
+					time = `${timeAsNumber}:00`
+				}
+				time = getFormatedDate() + ' ' + time
+			} else {
+				time = getFormatedDate() + ' ' + time
+			}
+			_date = new Date(time)
+			_isVaidDate(_date)
 		} else {
-			let AP_PM = hour < 12 ? 'AM' : 'PM'
+			_isVaidDate(time)
+			_date = time
+		}
+		let hour = _date.getHours()
+		const minutes = _formatNumber(_date.getMinutes())
+		const label = hour >= 12 ? 'PM' : 'AM'
+		if (opts?.military) {
+			return `${hour}:${minutes}`
+		} else if (opts?.asISOString) {
+			return _date.toISOString()
+		} else if (opts?.asLocalString) {
+			return _date.toLocaleTimeString('en-US', {
+				timeZone: 'America/New_York',
+			})
+		} else if (opts?.asUTCString) {
+			return _date.toUTCString()
+		} else {
 			if (hour === 0) hour = 12
-			if (hour > 12) hour = hour - 12
-			if (Number(minute) < 10) minute = '0' + minute
-			return `${hour}:${minute} ${AP_PM}`
+			return `${hour > 12 ? Number(hour) - 12 : hour}:${minutes} ${label}`
+		}
+	}
+
+	/** @param [dateTime] {string | Date} - The Time to be converted
+	 * 	@param [opts] {Object} - Should be returned in military time
+	 * 	@param [opts.military] {boolean} - Should be returned in military time
+	 *  @param [opts.asISOString] {boolean}
+	 *  @param [opts.asLocalString] {boolean}
+	 *  @param [opts.asUTCString] {boolean}
+	 *  @returns {string}
+	 */
+	function getFormatedDateTime(
+		dateTime?: string | Date,
+		opts?: {
+			asISOString?: boolean
+			military?: boolean
+			asLocalString?: boolean
+			asUTCString?: boolean
+		}
+	): string {
+		let _date: Date = null
+		if (!dateTime) {
+			_date = new Date()
+		} else if (!(dateTime instanceof Date)) {
+			if (typeof dateTime !== 'string') {
+				throw new Error(
+					`Only strings and Date Objects are valid for formatTime function. Recieved ${dateTime}`
+				)
+			}
+			if (
+				dateTime.includes(' ') &&
+				(dateTime.includes('/') || dateTime.includes('-'))
+			) {
+				/** Full Date Time */
+				let label = dateTime.slice(dateTime.length - 2, dateTime.length)
+				dateTime = dateTime.substring(0, dateTime.length - 2) + ' ' + label
+			}
+			_date = new Date(dateTime)
+			_isVaidDate(_date)
+		} else {
+			_isVaidDate(dateTime)
+			_date = dateTime
+		}
+
+		const day = _formatNumber(_date.getDate())
+		const month = _formatNumber(_date.getMonth() + 1)
+		const year = _date.getFullYear()
+		let hour = _date.getHours()
+		const minutes = _formatNumber(_date.getMinutes())
+		const label = hour >= 12 ? 'PM' : 'AM'
+		if (opts?.asISOString) {
+			return _date.toISOString()
+		} else if (opts?.military) {
+			return `${month}-${day}-${year} ${hour}:${minutes}`
+		} else if (opts?.asLocalString) {
+			return _date.toLocaleString('en-US', {
+				timeZone: 'America/New_York',
+			})
+		} else if (opts?.asUTCString) {
+			return _date.toUTCString()
+		} else {
+			if (hour === 0) hour = 12
+			return `${month}-${day}-${year} ${
+				hour > 12 ? hour - 12 : hour
+			}:${minutes} ${label}`
 		}
 	}
 
@@ -387,37 +575,11 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		return date.toLocaleTimeString()
 	}
 
-	/** Returns a date in ISO format
-	 * @param [date] {string | Date}
-	 * @returns {string}
-	 */
-	function getISOFormattedDate(date?: string | Date): string {
-		const _date = getFormatedDate(date)
-		return new Date(_date + ' 00:00:00').toISOString()
-	}
-
-	/** Returns a date in ISO format
-	 * @param [date] {string | Date}
-	 * @param [time] {string | Date}
-	 * @param [offset] {number}
-	 * @returns {string}
-	 */
-	function getISOFormattedDateTime(
-		date?: string | Date,
-		time?: string | Date,
-		offset?: number
-	): string {
-		const _date = getFormatedDate(date)
-		const _time = getFormatedTime(time, { military: true, offset: offset })
-		return new Date(`${_date} ${_time}`).toISOString()
-	}
-
 	const Converter: ConverterInterface = {
 		getFormatedDate,
 		getFormatedTime,
 		getTimestamp,
-		getISOFormattedDate,
-		getISOFormattedDateTime,
+		getFormatedDateTime,
 	}
 
 	/** Finds the closest day given a day number and direction
@@ -514,6 +676,23 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		return results
 	}
 
+	/** Returns all the mappings for a table
+	 * @param tableId {string} - The table you want the mappings for
+	 * @param mappings {Mappings} - Standard block mappings
+	 * @param [refNames] {string[]} - The mappings required
+	 * @returns {Mapping[]}
+	 */
+	function getMappingsForTable(
+		tableId: TableId,
+		mappings: Mappings,
+		refNames?: string[]
+	): Mapping[] {
+		const mapping = _getFieldsInTable(tableId, mappings)
+		return refNames?.length
+			? mapping.filter((map) => refNames.includes(map.refName))
+			: mapping
+	}
+
 	/** Selects a table from the current base
 	 * @param base {Base} - The global base object
 	 * @param tableId {string} - The table you want to select
@@ -525,18 +704,21 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	/** Select a view from the current base
 	 * @param base {Base} - Global Base Object
 	 * @param tableId {string} - The Table the view is in
-	 * @param viewId {string} - The view you want
+	 * @param viewIdOrName {string} - The view you want
 	 * @returns {View}
 	 */
-	function selectView(base: Base, tableId: TableId, viewId: ViewId): View {
-		const table = this.selectTable(base, tableId)
-		return table.getView(viewId)
+	function selectView(base: Base, tableId: TableId, viewIdOrName: ViewId): View {
+		const table = selectTable(base, tableId)
+		return viewIdOrName.includes('viw')
+			? table.getView(viewIdOrName)
+			: table.views.find((view) => view.name === viewIdOrName)
 	}
 
 	/** Selects a field from a table
 	 * @param base {base} - The global base object
 	 * @param tableId {string} - The Table's ID
 	 * @param fieldId {string} - The fields ID
+	 * @returns {Field}
 	 */
 	function selectField(base: Base, tableId: TableId, fieldId: FieldId): Field {
 		const table = this.selectTable(base, tableId) as Table
@@ -577,16 +759,15 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			/** Date Time Fields */
 			let convertedValue: string
 			if (includesTime) {
-				if (typeof value === 'string' && value.includes(' ')) {
-					// User entered date time
-					const [date, time] = value.split(' ')
-					convertedValue = getISOFormattedDateTime(date, time)
-				} else {
-					// Pre-formated date time
-					convertedValue = getISOFormattedDateTime(value, value)
-				}
+				/** Time Fields Coming in should be GMT based
+				 * so converting to UTC gives us the "East Coast" Time
+				 * Return as a ISO string
+				 */
+				convertedValue = new Date(
+					getFormatedDateTime(value, { asUTCString: true })
+				).toISOString()
 			} else {
-				convertedValue = getISOFormattedDate(value)
+				convertedValue = getFormatedDate(value, { asISOString: true })
 			}
 			return convertedValue
 		}
@@ -625,10 +806,10 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		}
 
 		function handleAttachment(values: Attachment[]): Attachment[] {
-			if(!values?.length) throw new Error('Attchements array is empty')
-			return values.map(value => {
-				if(!value.url)
-					throw new Error('Invalid Attachment. Missing URL or FileName') 
+			if (!values?.length) throw new Error('Attchements array is empty')
+			return values.map((value) => {
+				if (!value.url)
+					throw new Error('Invalid Attachment. Missing URL or FileName')
 				return value
 			})
 		}
@@ -926,6 +1107,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		selectField,
 		convertRecordFieldsToIds,
 		convertRecordFieldsToNames,
+		getMappings: getMappingsForTable,
 		selectRecords: selectTableAndRecords,
 		createRecords,
 		createErrorRecord,
@@ -1116,16 +1298,9 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				/** Date Time Fields */
 				let convertedValue: string
 				if (includesTime) {
-					if (typeof value === 'string' && value.includes(' ')) {
-						// User entered date time
-						const [date, time] = value.split(' ')
-						convertedValue = getISOFormattedDateTime(date, time)
-					} else {
-						// Pre-formated date time
-						convertedValue = getISOFormattedDateTime(value, value)
-					}
+					convertedValue = getFormatedDateTime(value, { asLocalString: true })
 				} else {
-					convertedValue = getISOFormattedDate(value)
+					convertedValue = getFormatedDate(value, { asLocalString: true })
 				}
 				return convertedValue
 			}
@@ -1289,7 +1464,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 					null
 				>(
 					`${baseId}/${tableId}?${queryParams}${
-						offset ? 'offset=' + offset : ''
+						offset ? '&offset=' + offset : ''
 					}`,
 					'GET',
 					null,
@@ -1396,6 +1571,35 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 			}
 			return results
 		},
+	}
+
+	/** Creates a Table in a Base
+	 * @param tableData {NewTableData[]}
+	 * @returns {Promise<void>}
+	 */
+	function createRemoteTable(tableData: NewTable[]): Promise<void> {
+		return new Promise<void>(async (resolve, reject) => {
+			let errors = []
+			for (let i = 0; i < tableData.length; i++) {
+				const data = tableData[i]
+				try {
+					if (!data.baseId || !data.name)
+						throw new Error('Base ID and Table Name Requried')
+					await customFetch._fetch<void, NewTable>(
+						`meta/bases/${data.baseId}/tables`,
+						'POST',
+						{
+							name: data.name,
+							fields: data.fields,
+						}
+					)
+				} catch (error) {
+					console.error(`ERROR CREATING TABLE: ${error.message}`)
+					errors.push(error.message)
+				}
+			}
+			errors.length ? reject(errors) : resolve()
+		})
 	}
 
 	/** Gets all the records from a remote base's specified table
@@ -1518,6 +1722,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	}
 
 	const RemoteConnection: RemoteConnectionInterface = {
+		createTable: createRemoteTable,
 		getRecords: getRemoteRecords,
 		createRecords: createRemoteRecords,
 		updateRecords: updateRemoteRecords,
