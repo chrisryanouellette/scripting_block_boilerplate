@@ -1300,7 +1300,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				if (includesTime) {
 					convertedValue = getFormatedDateTime(value, { asLocalString: true })
 				} else {
-					convertedValue = getFormatedDate(value, { asLocalString: true })
+					convertedValue = getFormatedDate(value)
 				}
 				return convertedValue
 			}
