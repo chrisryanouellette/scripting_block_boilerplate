@@ -1298,7 +1298,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				/** Date Time Fields */
 				let convertedValue: string
 				if (includesTime) {
-					convertedValue = getFormatedDateTime(value, { asLocalString: true })
+					convertedValue = getFormatedDateTime(value, { asISOString: true })
 				} else {
 					convertedValue = getFormatedDate(value)
 				}

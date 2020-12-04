@@ -95,7 +95,6 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
 	 * @property NewTableFields.type {string}
 	 * @property NewTableFields.name {string}
 	 */
-
 	var __awaiter =
 		(this && this.__awaiter) ||
 		function (thisArg, _arguments, P, generator) {
@@ -129,7 +128,6 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
 				step((generator = generator.apply(thisArg, _arguments || [])).next())
 			})
 		}
-
 	/** Checks if a date is valid
 	 * @param date {Date}
 	 * @returns {boolean}
@@ -933,9 +931,9 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
 				/** Date Time Fields */
 				let convertedValue
 				if (includesTime) {
-					convertedValue = getFormatedDateTime(value, { asLocalString: true })
+					convertedValue = getFormatedDateTime(value, { asISOString: true })
 				} else {
-					convertedValue = getFormatedDate(value, { asLocalString: true })
+					convertedValue = getFormatedDate(value)
 				}
 				return convertedValue
 			}
