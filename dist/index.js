@@ -236,7 +236,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
 		const minutes = _formatNumber(_date.getMinutes())
 		const label = hour >= 12 ? 'PM' : 'AM'
 		if (opts === null || opts === void 0 ? void 0 : opts.military) {
-			return `${hour}:${minutes}`
+			return `${_formatNumber(hour)}:${minutes}`
 		} else if (opts === null || opts === void 0 ? void 0 : opts.asISOString) {
 			return _date.toISOString()
 		} else if (opts === null || opts === void 0 ? void 0 : opts.asLocalString) {
