@@ -94,14 +94,6 @@ interface AirtableInterface {
 		tableId: TableId,
 		records: { fields: RecordFields }[]
 	): Promise<string[]>
-	createErrorRecord(
-		base: Base,
-		tableId: string,
-		errorName: string,
-		errorType: string,
-		errorMessage: string,
-		mappings: Mappings
-	): Promise<void>
 	updateRecords(
 		base: Base,
 		tableId: string,
@@ -689,7 +681,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 	): Mapping[] {
 		const mapping = _getFieldsInTable(tableId, mappings)
 		return refNames?.length
-			? mapping.filter((map) => refNames.includes(map.refName))
+			? refNames.map((refName) => mapping.find((map) => map.refName === refName))
 			: mapping
 	}
 
@@ -1004,35 +996,6 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		).then((ids) => [].concat.apply([], ids))
 	}
 
-	/** Creates a record in an errors table if it is mapped
-	 * @param base {Base} - Global Base Object
-	 * @param tableId {string} - The table's id where the records will be created
-	 * @param errorName {string}
-	 * @param errorType {string}
-	 * @param errorMessage {string}
-	 * @param mappings {Mappings} - Standard Mappings
-	 * @returns {Promise<string[]>}
-	 */
-	async function createErrorRecord(
-		base: Base,
-		tableId: string,
-		errorName: string,
-		errorType: string,
-		errorMessage: string,
-		mappings: Mappings
-	): Promise<void> {
-		const record = this.convertRecordFieldsToIds(
-			tableId,
-			{
-				name: errorName,
-				errorType,
-				errorMessage,
-			},
-			mappings
-		)
-		await this.createRecords(base, tableId, [{ fields: record }])
-	}
-
 	/** Updates records in a table
 	 * @param base {Base} - Global Base Object
 	 * @param tableId {string} - The table's id where the records will be created
@@ -1110,7 +1073,6 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 		getMappings: getMappingsForTable,
 		selectRecords: selectTableAndRecords,
 		createRecords,
-		createErrorRecord,
 		updateRecords,
 		removeRecords,
 	}
@@ -1241,11 +1203,13 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 				const _payload: { records: U[] }[] = []
 				payload.forEach((item, i) => {
 					/** Group every 10 records */
-					const index = Math.floor(i % 10)
+					let index = _payload.length - 1
 					if (!_payload[index]) {
 						_payload.push({ records: [item] })
-					} else {
+					} else if(_payload[index].records.length < 10) {
 						_payload[index].records.push(item)
+					} else {
+						_payload.push({ records: [item] })
 					}
 				})
 				const result = await this._throttleRequests<T, { records: U[] }>(
