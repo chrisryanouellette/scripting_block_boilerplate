@@ -560,6 +560,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (APIKEY)
 						acc[map.fieldId] = handleDateTime(fields[key], true)
 						break
 					case fieldTypes.MULTIPLE_RECORD_LINKS:
+					case fieldTypes.MULTIPLE_COLLABORATORS:
 						if (!Array.isArray(fields[key]))
 							throw new Error(key + ' is required to be an array')
 						value = fields[key]

@@ -853,6 +853,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 						)
 						break
 					case fieldTypes.MULTIPLE_RECORD_LINKS:
+					case fieldTypes.MULTIPLE_COLLABORATORS:
 						if (!Array.isArray(fields[key]))
 							throw new Error(key + ' is required to be an array')
 						value = fields[key] as SelectField[]
@@ -1206,7 +1207,7 @@ const { Converter, AirtableUtils, RemoteConnection, Utils } = (function (
 					let index = _payload.length - 1
 					if (!_payload[index]) {
 						_payload.push({ records: [item] })
-					} else if(_payload[index].records.length < 10) {
+					} else if (_payload[index].records.length < 10) {
 						_payload[index].records.push(item)
 					} else {
 						_payload.push({ records: [item] })
